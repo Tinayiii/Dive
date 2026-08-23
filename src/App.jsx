@@ -1,6 +1,12 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityGaugeLg, ActivityGaugeXs } from './components/untitled/application/charts/activity-gauges.jsx';
 import jsonActivities from './data/activities.json';
+import profileRecords from './data/profiles.json';
+import { isSupabaseConfigured } from './lib/supabase.js';
+import { ensureDemoSession, getSession } from './services/auth.js';
+import { applyToDate, listApplications } from './services/applications.js';
+import { continueDateCreation, generateDateCover } from './services/ai.js';
+import { createDate, listDates, listSavedDateIds, setDateSaved } from './services/dates.js';
 
 const modeName = { one: '1v1 Date', small: 'Small Date' };
 
@@ -41,10 +47,55 @@ const people = {
 const coverByCategory = { '私人据点':'custom', '小众节庆':'photo', '非常时段':'cinema', '幕后访问':'custom', '技能交换':'flowers', '城市探索':'photo', '圈层文化':'vinyl', '即兴冒险':'custom' };
 const parseBudget = (str) => { const match = String(str).match(/(\d+)/); return match ? Number(match[1]) : 0; };
 const statusMap = { '招募中':'招募中', '已满':'已 Lock', '已结束':'已结束' };
-const jsonHosts = {};
-jsonActivities.forEach((item) => { if (!jsonHosts[item.host_id]) { const tag = (item.tags || [])[0] || '活动'; jsonHosts[item.host_id] = { name: `Host${item.id}`, age: 25 + (item.id % 8), city: '北京', avatar: tag.charAt(0), intro: item.host_note || '喜欢组织有意思的活动。', interests: (item.tags || []).slice(0, 3) }; } });
-Object.assign(people, jsonHosts);
-const jsonDates = jsonActivities.map((item) => ({ id: `j${item.id}`, host: item.host_id, mode: item.activity_type === '双人' ? 'one' : 'small', title: item.title, cover: coverByCategory[item['活动类别']] || 'custom', coverImage: item.cover_image, vibe: item.vibe || [], content: item.activity_content, description: item.description, time: item.time, location: item.location, exact: item.location, budget: parseBudget(item.budget), payment: item.payment_method || 'AA', lockFee: item.deposit_enabled ? (item.deposit_amount || 0) : 0, refund: '活动开始前 24 小时可退', expectation: item.expectations || '', capacity: item.capacity || 2, attendees: [], status: statusMap[item.status] || '招募中', category: item.category, tags: item.tags || [], hostNote: item.host_note }));
+const profileKey = (id) => `profile-${id}`;
+const sortedProfileRecords = [...profileRecords].sort((a, b) => Number(a.id) - Number(b.id));
+const profileRecordById = Object.fromEntries(sortedProfileRecords.map((profile) => [String(profile.id), profile]));
+const profileImage = (profile) => `/profile-avatars/${profile.avatarUrl.split('/').at(-1)}`;
+
+sortedProfileRecords.forEach((profile) => {
+  people[profileKey(profile.id)] = {
+    name: profile.name,
+    age: Number(profile.age),
+    city: profile.city,
+    avatar: profile.name.charAt(0),
+    avatarImage: profileImage(profile),
+    gender: profile.gender,
+    intent: profile.datingIntent,
+    intro: profile.moment,
+    interests: profile.tags || [],
+    height: `${profile.heightCm}cm`,
+    education: profile.education,
+    work: profile.job,
+    mbti: profile.mbti,
+    datingStyle: profile.datingStyle,
+    availability: profile.availableTime,
+  };
+});
+
+function stableParticipants(activityId, capacity) {
+  const maximum = Math.min(3, Math.max(1, Number(capacity || 2) - 1));
+  const count = 1 + ((Number(activityId) * 7) % maximum);
+  const hostIndex = Number(activityId) - 1;
+  return Array.from({ length:count }, (_, offset) => {
+    const index = (hostIndex + 7 + (offset * 13)) % sortedProfileRecords.length;
+    return profileKey(sortedProfileRecords[index].id);
+  }).filter((id) => id !== profileKey(activityId));
+}
+
+const jsonDates = jsonActivities.map((item) => {
+  const hostProfile = profileRecordById[String(item.id)];
+  const isSmall = item.activity_type !== '双人';
+  return { id:`j${item.id}`, source:'library', activityId:item.id, host:profileKey(item.id), hostImage:hostProfile ? profileImage(hostProfile) : '', mode:isSmall ? 'small' : 'one', title:item.title, cover:coverByCategory[item['活动类别']] || 'custom', coverImage:item.cover_image, vibe:item.vibe || [], content:item.activity_content, description:item.description, time:item.time, location:item.location, exact:item.location, budget:parseBudget(item.budget), budgetText:item.budget, payment:item.payment_method || 'AA', lockFee:item.deposit_enabled ? (item.deposit_amount || 0) : 0, refund:'活动开始前 24 小时可退', expectation:item.expectations || '', capacity:item.capacity || 2, attendees:isSmall ? stableParticipants(item.id, item.capacity) : [], status:statusMap[item.status] || '招募中', category:item.category, activityCategory:item['活动类别'], tags:item.tags || [], hostNote:item.host_note, applicants:item.applicants || 0, matchedAttendees:item.matched_attendees || 0, rsvpDeadline:item.rsvp_deadline, ageRange:item.age_range, dressCode:item.dress_code };
+});
+const stableDateShuffle = (items) => [...items].sort((a, b) => ((Number(a.activityId) * 37) % 101) - ((Number(b.activityId) * 37) % 101));
+const recruitingWomen = stableDateShuffle(jsonDates.filter((date) => date.status === '招募中' && people[date.host]?.gender === '女'));
+const recruitingMen = stableDateShuffle(jsonDates.filter((date) => date.status === '招募中' && people[date.host]?.gender === '男'));
+const balancedFeedOrder = [];
+for (let index = 0; index < Math.max(recruitingWomen.length, recruitingMen.length); index += 1) {
+  if (recruitingWomen[index]) balancedFeedOrder.push(recruitingWomen[index]);
+  if (recruitingMen[index]) balancedFeedOrder.push(recruitingMen[index]);
+}
+const balancedFeedRank = Object.fromEntries(balancedFeedOrder.map((date, index) => [date.id, index]));
 const seedDatesAll = [...seedDates, ...jsonDates];
 
 const profileSeed = (id) => {
@@ -56,19 +107,19 @@ const profileSeed = (id) => {
     age: person.age,
     city: person.city,
     intro: person.intro,
-    photos: ['portrait', 'coffee', 'city'],
-    height: isVivi ? '165cm' : '175cm',
+    photos: person.avatarImage ? [person.avatarImage] : ['portrait', 'coffee', 'city'],
+    height: person.height || (isVivi ? '165cm' : '175cm'),
     zodiac: isVivi ? '双鱼座' : '狮子座',
-    education: isVivi ? '本科' : '硕士',
-    work: isVivi ? '产品经理' : '设计师',
+    education: person.education || (isVivi ? '本科' : '硕士'),
+    work: person.work || (isVivi ? '产品经理' : '设计师'),
     income: '',
     tags: isVivi ? ['慢热', '浪漫主义', '喜欢深聊'] : person.interests.slice(0, 3),
     intent: person.intent,
-    mbti: isVivi ? 'ENFP' : 'INFJ',
-    styles: isVivi ? [{ icon:'🐢', title:'慢慢熟型', copy:'熟起来之后会完全不一样。' }, { icon:'🎈', title:'一起玩再说', copy:'比起采访彼此，更喜欢一起做点什么。' }] : [{ icon:'☁️', title:'慢慢认识', copy:'先从一场具体的 Date 开始。' }],
+    mbti: person.mbti || (isVivi ? 'ENFP' : 'INFJ'),
+    styles: isVivi ? [{ icon:'🐢', title:'慢慢熟型', copy:'熟起来之后会完全不一样。' }, { icon:'🎈', title:'一起玩再说', copy:'比起采访彼此，更喜欢一起做点什么。' }] : [{ icon:'☁️', title:person.datingStyle || '慢慢认识', copy:'先从一场具体的 Date 开始。' }],
     activities: person.interests,
     peoplePreference: '1v1 与 Small Date 都可以',
-    availability: ['周六下午', '周日傍晚'],
+    availability: person.availability ? [person.availability] : ['周六下午', '周日傍晚'],
     voice: isVivi ? '0:16' : '',
     moments: isVivi ? [{ photo:'moment-surf', copy:'第一次学冲浪，站起来三秒。' }, { photo:'moment-shop', copy:'周末随机钻进一家没去过的店。' }] : [],
     privacy: { visibility:'all', work:true, income:false, stats:true, history:false },
@@ -94,6 +145,7 @@ const makeCreateDraft = () => ({
   budget: 100, budgetScope: '人均', payment: 'AA', lockFeeEnabled: true, fee: 30,
   refundPolicy: '活动开始前 24 小时可退', description: '想认识一个愿意在具体场景里慢慢聊天的人。',
   expectation: '愿意交流，也尊重彼此不说话的时刻。', vibe: ['松弛'], capacity: 2, visibility: '公开',
+  coverPrompt: '', coverImage: '',
   groupRhythm: '轻松聊天', icebreaker: '轻量即可', selectionRule: 'Host 审核', groupChatRule: '全部 Lock 后自动建群',
   confirmationTiming: '报名截止后 12 小时内确认', exitPolicy: '需要提前离开可以告诉 Host，安全永远优先。',
   hostProfileFields: ['城市', 'Dating intent', '兴趣', '一句自我介绍']
@@ -128,19 +180,96 @@ function generateRecommendations(text, mode, capacity) {
   return pool.slice(0, 3);
 }
 
-function Avatar({ id, small = false }) { const person = people[id]; return <span className={`avatar ${small ? 'small' : ''}`}>{person?.avatar ?? '?'}</span>; }
+const aiFieldLabels = {
+  title: '标题', vibe: '氛围', activity_content: '活动内容', time: '时间', location: '地点',
+  capacity: '人数', budget: '预算', payment_method: '付费方式', lock_fee_enabled: 'Lock fee',
+  lock_fee_amount: 'Lock fee 金额', expectations: '参与者期待'
+};
+
+function unwrapAiValue(value) {
+  return value && typeof value === 'object' && !Array.isArray(value) && 'value' in value ? value.value : value;
+}
+
+function aiSlotsToDraft(slots = {}) {
+  const value = (key) => unwrapAiValue(slots[key]);
+  const patch = {};
+  if (value('title')) patch.title = String(value('title'));
+  if (value('activity_content')) patch.content = String(value('activity_content'));
+  if (value('proposal_text')) patch.description = String(value('proposal_text'));
+  if (value('time')) patch.time = String(value('time'));
+  if (value('location')) patch.location = String(value('location'));
+  if (value('expectations')) patch.expectation = String(value('expectations'));
+  if (value('payment_method')) {
+    const payment = String(value('payment_method')).toLowerCase().replaceAll(' ', '');
+    patch.payment = payment === 'host_pays' || payment === 'host请客' ? 'Host 请客' : payment === 'split' || payment === 'aa' ? 'AA' : '各自支付';
+  }
+  if (value('budget') !== undefined) {
+    const budget = Number(value('budget'));
+    if (Number.isFinite(budget)) patch.budget = budget;
+  }
+  if (typeof value('lock_fee_enabled') === 'boolean') patch.lockFeeEnabled = value('lock_fee_enabled');
+  if (value('lock_fee_amount') !== undefined) {
+    const fee = Number(value('lock_fee_amount'));
+    if (Number.isFinite(fee)) patch.fee = fee;
+  }
+  if (value('capacity') !== undefined) {
+    const capacity = Number(value('capacity'));
+    if (Number.isFinite(capacity)) patch.capacity = Math.min(5, Math.max(3, capacity));
+  }
+  const vibe = value('vibe');
+  if (vibe) patch.vibe = (Array.isArray(vibe) ? vibe : String(vibe).split(/[、,，]/)).map(String).filter(Boolean).slice(0, 3);
+  return patch;
+}
+
+function appendRecognizedText(current, recognized) {
+  const existing = current.trim();
+  const incoming = recognized.trim().replace(/^[，。！？、,.!?\s]+/, '').replace(/[。！？!?]+$/, '');
+  if (!incoming) return existing;
+  if (!existing) return `${incoming}。`;
+  const separator = /[，。！？、,.!?]$/.test(existing) ? '' : '。';
+  return `${existing}${separator}${incoming}。`.replace(/。{2,}/g, '。');
+}
+
+function extractPreferenceTags(text) {
+  const rules = [
+    ['看展', /看展|展览|美术馆|画廊/],
+    ['咖啡', /咖啡|手冲|咖啡馆/],
+    ['书店', /书店|阅读|看书/],
+    ['电影', /电影|放映|影院/],
+    ['音乐', /音乐|演出|livehouse|唱片|黑胶/i],
+    ['手作', /手作|陶艺|花艺|木工/],
+    ['户外', /户外|徒步|公园|露营|骑行/],
+    ['散步', /散步|漫步|漫游/],
+    ['美食', /吃饭|美食|餐厅|火锅|私厨/],
+    ['运动', /运动|跑步|篮球|瑜伽|冲浪/],
+    ['安静', /安静|不吵|松弛|放松/],
+    ['热闹', /热闹|多人|认识新朋友/],
+    ['深聊', /深聊|聊得来|好好聊天|认真聊天/],
+    ['预算友好', /预算.{0,5}(别太高|不高|低|少|有限)|便宜|别太贵|不想花太多/],
+    ['周末', /周末|周六|周日/],
+    ['晚上', /晚上|夜里|下班后/],
+  ];
+  return rules.filter(([, pattern]) => pattern.test(text)).map(([label]) => label).slice(0, 8);
+}
+
+function Avatar({ id, small = false }) { const person = people[id]; return <span className={`avatar ${small ? 'small' : ''}`}>{person?.avatarImage ? <img src={person.avatarImage} alt=""/> : (person?.avatar ?? '?')}</span>; }
 function Pill({ children, tone = '' }) { return <span className={`pill ${tone}`}>{children}</span>; }
 function Button({ children, kind = 'secondary', className = '', ...props }) { return <button className={`button ${kind} ${className}`} {...props}>{children}</button>; }
 
 function App() {
-  const [screen, setScreen] = useState({ name: 'dating-plan' });
+  const [screen, setScreen] = useState({ name: 'splash' });
   const [screenHistory, setScreenHistory] = useState([]);
   const [dates, setDates] = useState(seedDatesAll);
   const [actor, setActor] = useState('vivi');
   const [applications, setApplications] = useState(initialApplications);
   const [saved, setSaved] = useState(['d5']);
   const [skipped, setSkipped] = useState([]);
-  const [index, setIndex] = useState(0);
+  const [currentActivityId, setCurrentActivityId] = useState(null);
+  const [discoverView, setDiscoverView] = useState('cards');
+  const [libraryQuery, setLibraryQuery] = useState('');
+  const [libraryStatus, setLibraryStatus] = useState('all');
+  const [libraryMode, setLibraryMode] = useState('all');
+  const [libraryCategory, setLibraryCategory] = useState('all');
   const [filters, setFilters] = useState({ time: '本周末', distance: '3 km', modes: ['one', 'small'] });
   const [filterOpen, setFilterOpen] = useState(false);
   const [calendarConnected, setCalendarConnected] = useState(false);
@@ -162,6 +291,7 @@ function App() {
   const [createDirty, setCreateDirty] = useState(false);
   const [createExitPrompt, setCreateExitPrompt] = useState(false);
   const [publishConfirm, setPublishConfirm] = useState(false);
+  const [aiCreate, setAiCreate] = useState({ sessionId:null, revision:1, reply:'', quickReplies:[], missing:[], messages:[], input:'', loading:false, error:'' });
   const [feedbackTab, setFeedbackTab] = useState('rating');
   const [feedbackSent, setFeedbackSent] = useState({});
   const [memory, setMemory] = useState([]);
@@ -169,10 +299,95 @@ function App() {
   const [profileDraft, setProfileDraft] = useState(null);
   const [discardProfileEdit, setDiscardProfileEdit] = useState(false);
   const [roleHint, setRoleHint] = useState(false);
-  const [dragX, setDragX] = useState(0);
+  const [swipeMotion, setSwipeMotion] = useState({ x:0, dragging:false, exiting:false });
+  const [failedCoverIds, setFailedCoverIds] = useState([]);
+  const [failedActivityImageIds, setFailedActivityImageIds] = useState([]);
+  const [preferenceVoice, setPreferenceVoice] = useState({ transcript:'', status:'idle' });
+  const [createVoice, setCreateVoice] = useState({ status:'idle' });
   const [rejectTarget, setRejectTarget] = useState(null);
-  const dragStart = useRef(null);
+  const [backendUserId, setBackendUserId] = useState(null);
+  const swipeGesture = useRef(null);
+  const swipeAnimating = useRef(false);
+  const swipeTimer = useRef(null);
+  const suppressCardClickUntil = useRef(0);
+  const preferenceVoiceTimer = useRef(null);
+  const preferenceVoiceRequest = useRef(0);
+  const createVoiceTimer = useRef(null);
+  const createVoiceRequest = useRef(0);
+  const createSpeechRecognition = useRef(null);
+  const preferenceSpeechRecognition = useRef(null);
+  const preferenceVoiceBase = useRef('');
+  const splashEntered = useRef(false);
   const timeout = useRef();
+
+  const enterFromSplash = () => {
+    if (splashEntered.current) return;
+    splashEntered.current = true;
+    setScreenHistory([]);
+    setScreen({ name:'dating-plan' });
+    window.scrollTo({ top:0 });
+  };
+
+  useEffect(() => {
+    if (!isSupabaseConfigured) return undefined;
+    let active = true;
+
+    async function loadBackend() {
+      try {
+        const autoAnonymous = import.meta.env.VITE_SUPABASE_AUTO_ANON === 'true';
+        const session = autoAnonymous ? await ensureDemoSession() : await getSession();
+        const remoteDates = await listDates();
+        if (!active) return;
+
+        remoteDates.forEach((date) => {
+          people[date.host] = {
+            name: date.hostProfile.name,
+            age: date.hostProfile.age || 18,
+            city: date.hostProfile.city || '',
+            avatar: date.hostProfile.name.charAt(0) || 'D',
+            intent: '从一场具体的 Date 开始',
+            intro: date.hostProfile.intro,
+            interests: date.hostProfile.interests,
+          };
+        });
+        setDates((current) => [
+          ...remoteDates,
+          ...current.filter((date) => !date.backend && !remoteDates.some((remote) => remote.id === date.id)),
+        ]);
+
+        if (!session?.user) return;
+        setBackendUserId(session.user.id);
+        const [savedIds, remoteApplications] = await Promise.all([
+          listSavedDateIds(session.user.id),
+          listApplications(),
+        ]);
+        if (!active) return;
+        remoteApplications.forEach((application) => {
+          const profile = application.applicantProfile;
+          if (!profile) return;
+          people[application.user] = {
+            name: profile.display_name || 'Dive User',
+            age: profile.age || 18,
+            city: profile.city || '',
+            avatar: (profile.display_name || 'D').charAt(0),
+            intent: '从一场具体的 Date 开始',
+            intro: profile.intro || '',
+            interests: profile.interests || [],
+          };
+        });
+        setSaved((current) => [...new Set([...current, ...savedIds])]);
+        setApplications((current) => [
+          ...remoteApplications,
+          ...current.filter((item) => !item.backend),
+        ]);
+      } catch (error) {
+        console.warn('Supabase initialization failed; using local prototype data.', error);
+      }
+    }
+
+    loadBackend();
+    return () => { active = false; };
+  }, []);
 
   const me = actor;
   const activeProfile = profiles[me] || profileSeed(me);
@@ -206,12 +421,93 @@ function App() {
   function leaveProfileEdit() { if (profileDirty) setDiscardProfileEdit(true); else { setProfileDraft(null); goBack(); } }
   function updateProfileSetting(section, key, value) { setProfiles((items) => ({ ...items, [me]: { ...activeProfile, [section]: { ...activeProfile[section], [key]: value } } })); }
 
-  const discoverable = useMemo(() => dates.filter((date) => date.host !== me && !date.attendees.includes(me) && !skipped.includes(date.id) && !date.expired && filters.modes.includes(date.mode) && date.status === '招募中'), [dates, me, skipped, filters]);
-  const activeDate = discoverable[index % Math.max(discoverable.length, 1)];
+  const discoverable = useMemo(() => {
+    const eligible = dates.filter((date) => date.host !== me && !date.attendees.includes(me) && !skipped.includes(date.id) && !date.expired && filters.modes.includes(date.mode) && date.status === '招募中');
+    return [...eligible].sort((a, b) => (balancedFeedRank[a.id] ?? Number.MAX_SAFE_INTEGER) - (balancedFeedRank[b.id] ?? Number.MAX_SAFE_INTEGER));
+  }, [dates, me, skipped, filters]);
+  const activeDate = discoverable.find((date) => date.id === currentActivityId) || discoverable[0] || null;
+
+  useEffect(() => {
+    setCurrentActivityId((current) => discoverable.some((date) => date.id === current) ? current : (discoverable[0]?.id ?? null));
+  }, [discoverable]);
+
+  useEffect(() => {
+    const resetSwipe = () => {
+      if (swipeAnimating.current) return;
+      swipeGesture.current = null;
+      setSwipeMotion({ x:0, dragging:false, exiting:false });
+    };
+    window.addEventListener('blur', resetSwipe);
+    return () => {
+      window.removeEventListener('blur', resetSwipe);
+      clearTimeout(swipeTimer.current);
+      clearTimeout(preferenceVoiceTimer.current);
+      clearTimeout(createVoiceTimer.current);
+      preferenceSpeechRecognition.current?.abort?.();
+      createSpeechRecognition.current?.stop?.();
+    };
+  }, []);
+
+  function nextActivityId(id, list = discoverable) {
+    if (list.length < 2) return null;
+    const position = list.findIndex((date) => date.id === id);
+    if (position < 0) return list[0]?.id ?? null;
+    return list[(position + 1) % list.length]?.id ?? null;
+  }
 
   function updateDate(id, next) { setDates((items) => items.map((item) => item.id === id ? { ...item, ...next } : item)); }
-  function toggleSave(id) { setSaved((ids) => ids.includes(id) ? ids.filter((item) => item !== id) : [...ids, id]); say(saved.includes(id) ? '已取消收藏' : '已加入收藏'); }
-  function apply(date) { setApplications((items) => [...items, { id: `a${Date.now()}`, dateId: date.id, user: 'vivi', status: '申请中', note: '我很想参加，想先了解一下当天的节奏。' }]); addNotice('Host 收到一份新的 Apply', `Vivi 想参加「${date.title}」。`, date.id); setMyTab('joined'); say('Apply 已提交，等待 Host 回复'); go('my'); }
+  async function setActivitySaved(id, shouldSave) {
+    const wasSaved = saved.includes(id);
+    if (wasSaved === shouldSave) return true;
+    setSaved((ids) => shouldSave ? [...new Set([...ids, id])] : ids.filter((item) => item !== id));
+    const date = currentDate(id);
+    if (date?.backend && backendUserId) {
+      try {
+        await setDateSaved(backendUserId, id, shouldSave);
+      } catch (error) {
+        setSaved((ids) => wasSaved ? [...new Set([...ids, id])] : ids.filter((item) => item !== id));
+        say('收藏同步失败，请稍后再试');
+        return false;
+      }
+    }
+    return true;
+  }
+  async function toggleSave(id) {
+    const shouldSave = !saved.includes(id);
+    const succeeded = await setActivitySaved(id, shouldSave);
+    if (succeeded) say(shouldSave ? '已加入收藏' : '已取消收藏');
+    return succeeded;
+  }
+  function skipActivity(id, nextId = nextActivityId(id)) {
+    setSkipped((items) => items.includes(id) ? items : [...items, id]);
+    setCurrentActivityId(nextId);
+    say('已跳过，换一场看看');
+  }
+  async function saveActivity(id, nextId = nextActivityId(id)) {
+    const succeeded = await setActivitySaved(id, true);
+    if (!succeeded) {
+      setCurrentActivityId(id);
+      return;
+    }
+    setCurrentActivityId(nextId);
+    say('已收藏');
+  }
+  async function apply(date) {
+    const note = '我很想参加，想先了解一下当天的节奏。';
+    let application = { id: `a${Date.now()}`, dateId: date.id, user: 'vivi', status: '申请中', note };
+    if (date.backend) {
+      if (!backendUserId) return say('请先登录后再 Apply');
+      try {
+        application = { ...(await applyToDate(backendUserId, date.id, note)), user:me };
+      } catch (error) {
+        say(error?.code === '23505' ? '你已经 Apply 过这场 Date' : 'Apply 提交失败，请稍后再试');
+        return;
+      }
+    }
+    setApplications((items) => [...items, application]);
+    addNotice('Host 收到一份新的 Apply', `Vivi 想参加「${date.title}」。`, date.id);
+    setMyTab('joined'); say('Apply 已提交，等待 Host 回复'); go('my');
+  }
   function approve(application) { setApplications((items) => items.map((item) => item.id === application.id ? { ...item, status: '待支付 Lock fee' } : item)); addNotice('Host 同意了你的 Apply', '请主动支付 Lock fee，锁定这次席位。', application.dateId); say('已同意，Guest 将收到 Lock fee 提醒'); }
   function reject(application, reason) { setApplications((items) => items.map((item) => item.id === application.id ? { ...item, status: '已拒绝', reason } : item)); addNotice('这次暂时没有匹配上', 'Host 已处理你的 Apply；内部理由不会对外展示。', application.dateId); say('已拒绝；理由仅作为匹配反馈'); }
   function lock(date) { setApplications((items) => items.map((item) => item.dateId === date.id && item.user === 'vivi' ? { ...item, status: '已 Lock' } : item)); updateDate(date.id, { attendees: [...date.attendees, 'vivi'], status: date.mode === 'one' ? '已 Lock' : date.status }); addNotice('Dive Invite 已生成', '你的席位已锁定，精确集合点现在可见。', date.id); say('Lock 成功，Dive Invite 已生成'); go('detail', { dateId: date.id }); }
@@ -234,7 +530,7 @@ function App() {
   function setChatContext(chatId, dateId) { setChats((items) => items.map((chat) => chat.id === chatId ? { ...chat, contextDateId:dateId } : chat)); }
 
   function Header({ title, back = false, actions = true, onBack }) {
-    return <header className="topbar"><div>{back ? <button className="icon" onClick={onBack || goBack} aria-label="返回">‹</button> : <button className="brand" onClick={() => go('discover', {}, { resetHistory:true })}><img src="/dive-icon.png"/><b>Dive</b></button>}</div><h1>{title}</h1><div className="top-actions">{actions && <><button className="role-switch" onClick={() => { setActor(actor === 'vivi' ? 'lin' : 'vivi'); say(actor === 'vivi' ? '原型角色：Host 林' : '原型角色：Guest Vivi'); }} title="原型测试角色">{actor === 'vivi' ? 'Vivi' : '林'}</button><button className="icon notification" onClick={() => setNotificationOpen(true)}>◌{unread ? <i /> : null}</button></>}</div></header>;
+    return <header className="topbar"><div>{back ? <button className="icon" onClick={onBack || goBack} aria-label="返回">‹</button> : <button className="brand" onClick={() => go('discover', {}, { resetHistory:true })} aria-label="Dive 首页"><img src="/dive-plan-icon.png" alt="Dive"/></button>}</div><h1>{title}</h1><div className="top-actions">{actions && <><button className="role-switch" onClick={() => { setActor(actor === 'vivi' ? 'lin' : 'vivi'); say(actor === 'vivi' ? '原型角色：Host 林' : '原型角色：Guest Vivi'); }} title="原型测试角色">{actor === 'vivi' ? 'Vivi' : '林'}</button><button className="icon notification" onClick={() => setNotificationOpen(true)} aria-label="查看通知">◌{unread ? <i /> : null}</button></>}</div></header>;
   }
 
   function Nav() {
@@ -250,17 +546,19 @@ function App() {
       {links.slice(2).map(([name, symbol, label]) => <button key={name} className={screen.name === name ? 'active' : ''} onClick={() => go(name, {}, { resetHistory:true })}><b>{symbol}</b><span>{label}</span></button>)}
     </nav>;
   }
-  function Layout({ title, back, children, bare = false, noHeader = false, onBack }) { return <><aside className="desktop-note"><img src="/dive-icon.png"/><h2>移动端流程模拟器</h2><p>用浏览器验证逻辑与跳转。顶部「Vivi / 林」是原型测试角色切换，正式产品不会出现。</p><button onClick={() => setRoleHint(!roleHint)}>{roleHint ? '收起测试提示' : '显示测试提示'}</button></aside><main className="phone">{roleHint && <div className="prototype-ribbon">原型测试：切换「Vivi / 林」可完整走 Guest → Host 审批 → Lock 流程。</div>}{!noHeader && <Header title={title} back={back} onBack={onBack}/>}<section className={`screen ${noHeader ? 'screen-no-header' : ''}`} style={noHeader ? { padding:0 } : undefined}>{children}</section>{!bare && <Nav/>}</main>{toast && <div className="toast">{toast}</div>}{notificationOpen && <NotificationSheet/>}{rejectTarget && <RejectSheet/>}{discardProfileEdit && <DiscardProfileSheet/>}{chatActionId && <ChatActionSheet chat={chats.find((chat) => chat.id === chatActionId)}/>} {contextPickerId && <ContextPickerSheet chat={chats.find((chat) => chat.id === contextPickerId)}/>} {chatPlusId && <ChatPlusSheet chatId={chatPlusId}/>} {imagePreview && <ImagePreviewSheet/>}</> }
+  function Layout({ title, back, children, bare = false, noHeader = false, onBack }) { return <><aside className="desktop-note"><img src="/dive-plan-icon.png" alt="Dive"/><h2>移动端流程模拟器</h2><p>用浏览器验证逻辑与跳转。顶部「Vivi / 林」是原型测试角色切换，正式产品不会出现。</p><button onClick={() => setRoleHint(!roleHint)}>{roleHint ? '收起测试提示' : '显示测试提示'}</button></aside><main className={`phone ${bare ? 'phone-no-nav' : 'phone-has-nav'}`}>{roleHint && <div className="prototype-ribbon">原型测试：切换「Vivi / 林」可完整走 Guest → Host 审批 → Lock 流程。</div>}{!noHeader && <Header title={title} back={back} onBack={onBack}/>}<section className={`screen ${noHeader ? 'screen-no-header' : ''}`} style={noHeader ? { padding:0 } : undefined}>{children}</section>{!bare && <Nav/>}</main>{toast && <div className="toast">{toast}</div>}{notificationOpen && <NotificationSheet/>}{rejectTarget && <RejectSheet/>}{discardProfileEdit && <DiscardProfileSheet/>}{chatActionId && <ChatActionSheet chat={chats.find((chat) => chat.id === chatActionId)}/>} {contextPickerId && <ContextPickerSheet chat={chats.find((chat) => chat.id === contextPickerId)}/>} {chatPlusId && <ChatPlusSheet chatId={chatPlusId}/>} {imagePreview && <ImagePreviewSheet/>}</> }
 
-  function Hero({ date, compact = false, onClick }) { const host = people[date.host]; const coverStyle = date.coverImage ? { backgroundImage: `linear-gradient(to top,rgba(10,5,15,.92) 10%,rgba(10,5,15,.3) 60%,transparent),url(${date.coverImage})`, backgroundSize: 'cover', backgroundPosition: 'center' } : undefined; return <article className={`hero cover-${date.cover} ${compact ? 'compact' : ''}`} style={coverStyle} onClick={onClick}><div className="hero-shine"/><div className="pills"><Pill>{modeName[date.mode]}</Pill><Pill>{date.status}</Pill><Pill>¥{date.budget}</Pill></div><div className="hero-body"><p className="hero-kicker">{date.mode === 'one' ? '为两个人留出一点真实时间' : '在具体场景里自然认识一群人'}</p><h2>{date.title}</h2><p>{date.content}</p><div className="date-grid frosted"><div><small>时间</small><b>{date.time}</b></div><div><small>区域</small><b>{date.location}</b></div></div><button className="host-card frosted" onClick={(e) => { e.stopPropagation(); go('profile', { userId: date.host }); }}><Avatar id={date.host}/><span><b>{host.name} · {host.age}</b><small>{host.intro}</small></span>{date.mode === 'small' && <AvatarStack ids={date.attendees}/>}</button></div></article>; }
+  function Hero({ date, compact = false, onClick, onImageClick, disabled = false }) { const host = people[date.host]; const cardImage = date.hostImage || date.coverImage; const showCoverImage = cardImage && !failedCoverIds.includes(date.id); const openCard = (event) => { if (!onClick || disabled) return; event.stopPropagation(); const imageArea = event.target === event.currentTarget || event.target.classList.contains('hero-shine'); (imageArea && onImageClick ? onImageClick : onClick)(); }; const openHostArea = (event) => { event.stopPropagation(); go('profile', { userId:date.host }); }; return <article className={`hero cover-${date.cover} ${compact ? 'compact' : ''} ${disabled ? 'is-disabled' : ''}`} onClick={openCard} aria-disabled={disabled || undefined}>{showCoverImage && <img className="hero-cover-image" src={cardImage} alt="" onError={() => setFailedCoverIds((ids) => ids.includes(date.id) ? ids : [...ids, date.id])}/>}<div className="hero-shine"/><div className="pills"><Pill>{modeName[date.mode]}</Pill><Pill>{date.status}</Pill><Pill>¥{date.budget}</Pill></div><div className="hero-body"><p className="hero-kicker">{date.mode === 'one' ? '为两个人留出一点真实时间' : '在具体场景里自然认识一群人'}</p><h2>{date.title}</h2><p>{date.content}</p><div className="date-grid frosted"><div><small>时间</small><b>{date.time}</b></div><div><small>区域</small><b>{date.location}</b></div></div><button className="host-card frosted" onClick={openHostArea} aria-label={`查看 ${host.name} 的 Profile`}><Avatar id={date.host}/><span><b>{host.name} · {host.age}</b><small>{host.intro}</small></span>{date.mode === 'small' && <AvatarStack ids={date.attendees}/>}</button></div></article>; }
   function AvatarStack({ ids = [] }) { return <div className="avatar-stack">{ids.slice(0,3).map((id) => <Avatar id={id} small key={id}/>)}{ids.length > 3 && <i>+{ids.length - 3}</i>}</div> }
   function Detail({ date }) {
+    if (!date) return <Layout title="活动详情" back><Empty title="活动暂时不可用" copy="这场活动可能已被删除或缺少有效 ID。" action="返回广场" onClick={() => go('discover', {}, { resetHistory:true })}/></Layout>;
     const mine = date.host === me;
     const application = appFor(date.id);
     const locked = date.attendees.includes('vivi');
     if (mine) return <HostDetail date={date}/>;
     const host = people[date.host];
-    return <Layout title="活动详情" back><section className="detail-v2"><article className="detail-hero"><div className={`detail-hero-bg cover-${date.cover}`} style={date.coverImage ? { backgroundImage: `linear-gradient(to top,rgba(10,5,15,.95) 20%,rgba(10,5,15,.5) 60%,transparent),url(${date.coverImage})`, backgroundSize: 'cover', backgroundPosition: 'center' } : undefined}/><div className="detail-hero-overlay"><div className="pills">{date.vibe.map((item) => <Pill tone="accent" key={item}>{item}</Pill>)}<Pill>{modeName[date.mode]}</Pill><Pill>{date.status}</Pill></div><h1>{date.title}</h1><p>{date.content}</p></div></article><section className="detail-info-grid"><div className="detail-info-card glass-strong"><span>⏱</span><b>活动时间</b><small>{date.time}</small></div><div className="detail-info-card glass-strong"><span>◎</span><b>区域</b><small>{date.location}</small></div><div className="detail-info-card glass-strong"><span>¥</span><b>预算</b><small>约 ¥{date.budget} · {date.payment}</small></div><div className="detail-info-card glass-strong"><span>📍</span><b>集合点</b><small>{locked ? date.exact : 'Lock 后开放'}</small></div></section>{date.lockFee ? <section className="detail-lock-card glass-strong"><div><b>Lock fee</b><small>¥{date.lockFee}</small></div><p>{date.refund}</p></section> : null}<button className="detail-host-card glass-strong" onClick={() => go('profile', { userId: date.host })}><Avatar id={date.host}/><div><b>{host.name} · {host.age}</b><small>{host.intro}</small></div><i>›</i></button><section className="detail-section glass-strong"><h3>这场 Date 的期待</h3><p>{date.expectation || 'Host 还没有写下具体期待，可以先问问 Host。'}</p></section>{date.mode === 'small' && <section className="detail-section glass-strong"><div className="heading"><h3>已确认参与者</h3><span>{date.attendees.length}/{date.capacity - 1} 已 Lock</span></div><AvatarStack ids={date.attendees}/><p className="muted">群体节奏：{date.rhythm} · 破冰：{date.icebreaker || '未设置'}</p></section>}{locked ? <div className="sticky"><Button onClick={() => newChat(date.host, date.id)}>活动 IM</Button><Button kind="primary" onClick={() => go('invite', { dateId: date.id })}>查看 Invite</Button></div> : application?.status === '待支付 Lock fee' ? <div className="sticky"><Button onClick={() => newChat(date.host, date.id)}>问问 Host</Button><Button kind="primary" onClick={() => lock(date)}>支付 ¥{date.lockFee || 0} Lock fee</Button></div> : application?.status === '申请中' ? <><div className="notice"><b>已提交 Apply</b><br/>申请不占位、不收费。Host 同意后你会收到 Lock fee 提醒。</div><div className="sticky"><Button kind="primary" onClick={() => newChat(date.host, date.id)}>继续和 Host 聊聊</Button></div></> : <div className="sticky"><Button onClick={() => toggleSave(date.id)}>{saved.includes(date.id) ? '已收藏' : 'Save'}</Button><Button onClick={() => newChat(date.host, date.id)}>问问 Host</Button><Button kind="primary" onClick={() => apply(date)}>Apply</Button></div>}</section></Layout>;
+    const showActivityImage = date.coverImage && !failedActivityImageIds.includes(date.id);
+    return <Layout title="活动详情" back><section className="detail-v2"><article className="detail-hero"><div className={`detail-hero-bg cover-${date.cover}`}>{showActivityImage && <img className="detail-hero-image" src={date.coverImage} alt={`${date.title} 活动图片`} onError={() => setFailedActivityImageIds((ids) => ids.includes(date.id) ? ids : [...ids, date.id])}/>}</div><div className="detail-hero-overlay"><div className="pills">{date.vibe.map((item) => <Pill tone="accent" key={item}>{item}</Pill>)}<Pill>{modeName[date.mode]}</Pill><Pill>{date.status}</Pill></div><h1>{date.title}</h1><p>{date.content}</p></div></article><section className="detail-info-grid"><div className="detail-info-card glass-strong"><span>⏱</span><b>活动时间</b><small>{date.time}</small></div><div className="detail-info-card glass-strong"><span>◎</span><b>区域</b><small>{date.location}</small></div><div className="detail-info-card glass-strong"><span>¥</span><b>预算</b><small>约 ¥{date.budget} · {date.payment}</small></div><div className="detail-info-card glass-strong"><span>📍</span><b>集合点</b><small>{locked ? date.exact : 'Lock 后开放'}</small></div></section>{date.lockFee ? <section className="detail-lock-card glass-strong"><div><b>Lock fee</b><small>¥{date.lockFee}</small></div><p>{date.refund}</p></section> : null}<button className="detail-host-card glass-strong" onClick={() => go('profile', { userId: date.host })}><Avatar id={date.host}/><div><b>{host.name} · {host.age}</b><small>{host.intro}</small></div><i>›</i></button><section className="detail-section glass-strong"><h3>这场 Date 的期待</h3><p>{date.expectation || 'Host 还没有写下具体期待，可以先问问 Host。'}</p></section>{date.mode === 'small' && <section className="detail-section glass-strong"><div className="heading"><h3>已确认参与者</h3><span>{date.attendees.length}/{date.capacity - 1} 已 Lock</span></div><AvatarStack ids={date.attendees}/><p className="muted">群体节奏：{date.rhythm} · 破冰：{date.icebreaker || '未设置'}</p></section>}{locked ? <div className="sticky"><Button onClick={() => newChat(date.host, date.id)}>活动 IM</Button><Button kind="primary" onClick={() => go('invite', { dateId: date.id })}>查看 Invite</Button></div> : application?.status === '待支付 Lock fee' ? <div className="sticky"><Button onClick={() => newChat(date.host, date.id)}>问问 Host</Button><Button kind="primary" onClick={() => lock(date)}>支付 ¥{date.lockFee || 0} Lock fee</Button></div> : application?.status === '申请中' ? <><div className="notice"><b>已提交 Apply</b><br/>申请不占位、不收费。Host 同意后你会收到 Lock fee 提醒。</div><div className="sticky"><Button kind="primary" onClick={() => newChat(date.host, date.id)}>继续和 Host 聊聊</Button></div></> : <div className="sticky"><Button onClick={() => toggleSave(date.id)}>{saved.includes(date.id) ? '已收藏' : 'Save'}</Button><Button onClick={() => newChat(date.host, date.id)}>问问 Host</Button><Button kind="primary" onClick={() => apply(date)}>Apply</Button></div>}</section></Layout>;
   }
   function Info({ label, value }) { return <div className="info"><span>{label}</span><b>{value}</b></div>; }
   function HostDetail({ date }) { const incoming = applications.filter((item) => item.dateId === date.id); const locked = date.attendees; return <Layout title="Host 管理" back><Hero date={date}/><section className="detail"><div className="notice"><b>Host 控制台</b><br/>Apply 需要手动审核，只有 Guest 完成 Lock 后才占位。</div><section className="block"><div className="heading"><h3>申请人 · {incoming.filter((item) => item.status === '待处理' || item.status === '申请中').length}</h3>{date.mode === 'small' && <button className="group-icon" disabled={locked.length < 2} onClick={() => say('活动群已建立：只包含 Host 与已 Lock Guest')}>◎</button>}</div>{incoming.length ? incoming.map((item) => <Applicant key={item.id} item={item} date={date}/>) : <p className="muted">还没有 Apply。</p>}</section><section className="block"><h3>已 Lock 参与者</h3>{locked.length ? <AvatarStack ids={locked}/> : <p className="muted">还没有人完成 Lock。</p>}</section><section className="block action-stack"><Button onClick={() => go('edit', { dateId: date.id })}>✎ 修改 Date</Button><Button kind="danger" onClick={() => { updateDate(date.id, { status: '已取消' }); say('Date 已取消并通知受影响用户'); go('my'); }}>删除 Date</Button></section></section></Layout>; }
@@ -273,34 +571,178 @@ function App() {
     return <Sheet close={() => setRejectTarget(null)}><section className="reject-sheet form"><p className="eyebrow">MATCHING FEEDBACK · 仅系统可见</p><h2>这次先不合适</h2><p className="muted">不会把理由发给申请人；它只会作为后续推荐的反馈信号。</p><label>主要原因<select value={reason} onChange={(event) => setReason(event.target.value)}><option>活动期待不太一致</option><option>节奏或时间不合适</option><option>人数偏好不匹配</option><option>其他</option></select></label><label>补充说明（可选）<textarea value={note} onChange={(event) => setNote(event.target.value)} placeholder="例如：更适合喜欢安静看展的参与者。"/></label><Button kind="danger" className="full" onClick={submit}>确认拒绝</Button></section></Sheet>;
   }
 
+  function Splash() {
+    return <main className="splash-screen" role="button" tabIndex="0" aria-label="进入 Dive" onClick={enterFromSplash} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') enterFromSplash(); }}>
+      <img className="splash-logo" src="/dive-logo.png" alt="Dive"/>
+      <h1 className="splash-title">
+        <span>Dive into real connections,</span>
+        <span>in your free time.</span>
+      </h1>
+    </main>;
+  }
+
   function DatingPlan() {
     const connect = (provider) => { setCalendarChoice(provider); setCalendarConnected(true); say(`${provider} Calendar 已模拟连接`); };
-    return <Layout title="Set up your dating plan" bare noHeader><section className="dating-plan"><img src="/dive-icon.png" className="dating-plan-logo"/><p className="eyebrow">DIVE · MAKE ROOM FOR A DATE</p><h1>Set up your<br/>dating plan.</h1><p className="dating-plan-copy">先为喜欢的人和真实见面，留出一点时间。Dive 只会在你有空的时候，为你找合适的 Date。</p>{calendarConnected ? <section className="availability-card glass-strong"><span className="availability-orb">✓</span><p>已连接 {calendarChoice} Calendar</p><h2>这周的 2 个可约空档</h2><div className="availability-slots"><button>周四 · 19:30</button><button>周日 · 15:00</button></div><Button kind="primary" className="full" onClick={() => { setFilters({ ...filters, time:'本周可约' }); setIndex(0); go('voice-preference'); }}>为我的空档找 Date</Button></section> : <section className="calendar-card glass-strong"><span className="calendar-glyph">◷</span><h2>Find your free pockets</h2><p>连接日历后，自动避开已有安排，优先展示你这周真正有空的 Date。</p><Button className="full" onClick={() => connect('Google')}>连接 Google Calendar</Button><Button className="full" onClick={() => connect('Apple')}>连接 Apple Calendar</Button></section>}<button className="manual-plan" onClick={() => { go('voice-preference'); setFilterOpen(true); }}>我想自己选时间和距离 <span>›</span></button><p className="plan-disclaimer">原型演示：不会读取或上传任何真实日历内容。</p></section></Layout>;
+    return <Layout title="Set up your dating plan" bare noHeader><section className="dating-plan"><img src="/dive-plan-icon.png" className="dating-plan-logo" alt="Dive"/><h1>What's your<br/>dating plan<br/>this week?</h1><p className="dating-plan-copy">告别无聊的线上聊天，用一次活动开启自然的见面和约会。</p>{calendarConnected ? <section className="availability-card glass-strong"><span className="availability-orb">✓</span><p>已连接 {calendarChoice} Calendar</p><h2>这周的 2 个可约空档</h2><div className="availability-slots"><button>周四 · 19:30</button><button>周日 · 15:00</button></div><Button kind="primary" className="full" onClick={() => { setFilters({ ...filters, time:'本周可约' }); setCurrentActivityId(null); go('voice-preference'); }}>为我的空档找 Date</Button></section> : <section className="calendar-card glass-strong"><span className="calendar-glyph">◷</span><h2>When are you free</h2><p>连接你的日历，让我们帮你挑选合适时间的活动。</p><Button className="full" onClick={() => connect('Google')}>连接 Google Calendar</Button><Button className="full" onClick={() => connect('Apple')}>连接 Apple Calendar</Button></section>}<button className="manual-plan" onClick={() => { go('voice-preference'); setFilterOpen(true); }}>我想自己选时间和距离 <span>›</span></button></section></Layout>;
   }
 
   function VoicePreference() {
-    const [transcript, setTranscript] = useState('');
-    const [isListening, setIsListening] = useState(false);
-    const mockTranscript = '最近想去看展，最好是安静一点的地方，预算别太高，想认识聊得来的人。';
-    const keywords = useMemo(() => {
-      const dict = ['看展','安静','预算低','聊得来','户外','咖啡','书店','电影','音乐','手作','散步','小酒馆','摄影','美食','运动'];
-      return dict.filter((word) => (transcript || mockTranscript).includes(word));
-    }, [transcript]);
-    const startListen = () => { setIsListening(true); setTimeout(() => { setTranscript(mockTranscript); setIsListening(false); say('已识别你的偏好'); }, 1600); };
-    const applyAndGo = () => { say('已记录你的偏好，进入活动广场'); go('discover', {}, { resetHistory:true }); };
-    return <Layout title="AI 助手" bare noHeader><section className="voice-preference"><div className="voice-preference-orb"/><p className="eyebrow">DIVE ASSISTANT</p><h1>最近想参加<br/>什么活动？</h1><p className="voice-preference-copy">用语音或文字告诉我，我会记住你的偏好，再为你挑合适的 Date。</p><section className="voice-input-card glass-strong"><button className={`voice-mic ${isListening ? 'listening' : ''}`} onClick={startListen} aria-label="按住说话"><svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="1" width="6" height="12" rx="3"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg></button><b>{isListening ? '正在听…' : '点击说话'}</b></section><label className="voice-text-label">或直接输入<textarea value={transcript} placeholder="例如：周末想去看展，预算别太高…" onChange={(event) => setTranscript(event.target.value)}/></label>{(transcript || isListening) && <section className="voice-keywords"><b>AI 提取到的偏好</b><div>{keywords.length ? keywords.map((word) => <span key={word}>{word}</span>) : <span className="placeholder">继续说说你的偏好</span>}</div></section>}<Button kind="primary" className="full" onClick={applyAndGo}>{transcript ? '就用这个偏好' : '跳过，去活动广场'}</Button><p className="voice-disclaimer">原型演示：不会上传或保存真实语音内容。</p></section></Layout>;
+    const transcript = preferenceVoice.transcript;
+    const voiceStatus = preferenceVoice.status;
+    const keywords = useMemo(() => extractPreferenceTags(transcript), [transcript]);
+    const toggleListening = () => {
+      if (voiceStatus === 'listening') {
+        preferenceVoiceRequest.current += 1;
+        preferenceSpeechRecognition.current?.abort?.();
+        setPreferenceVoice({ transcript:preferenceVoiceBase.current, status:'cancelled' });
+        say('已取消本次录音');
+        return;
+      }
+      const requestId = ++preferenceVoiceRequest.current;
+      preferenceSpeechRecognition.current?.abort?.();
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!SpeechRecognition) {
+        setPreferenceVoice((state) => ({ ...state, status:'failed' }));
+        say('当前浏览器不支持语音识别，请直接输入文字');
+        return;
+      }
+      const baseTranscript = transcript;
+      preferenceVoiceBase.current = baseTranscript;
+      setPreferenceVoice({ transcript:baseTranscript, status:'listening' });
+      try {
+        const recognition = new SpeechRecognition();
+        preferenceSpeechRecognition.current = recognition;
+        recognition.lang = 'zh-CN';
+        recognition.continuous = false;
+        recognition.interimResults = true;
+        let finalText = '';
+        let recognitionFailed = false;
+        recognition.onresult = (event) => {
+          let interimText = '';
+          for (let index = event.resultIndex; index < event.results.length; index += 1) {
+            const text = event.results[index][0]?.transcript || '';
+            if (event.results[index].isFinal) finalText += text;
+            else interimText += text;
+          }
+          const recognized = `${finalText}${interimText}`.trim();
+          if (!recognized || preferenceVoiceRequest.current !== requestId) return;
+          setPreferenceVoice({ transcript:appendRecognizedText(baseTranscript, recognized), status:'listening' });
+        };
+        recognition.onerror = (event) => {
+          if (preferenceVoiceRequest.current !== requestId || event.error === 'aborted') return;
+          recognitionFailed = true;
+          const denied = event.error === 'not-allowed' || event.error === 'service-not-allowed';
+          const unavailable = event.error === 'audio-capture';
+          setPreferenceVoice({ transcript:baseTranscript, status:'failed' });
+          say(denied ? '麦克风权限未开启，请在浏览器设置中允许访问' : unavailable ? '未检测到可用麦克风，请直接输入文字' : '识别失败，请再试一次或直接输入文字');
+        };
+        recognition.onend = () => {
+          if (preferenceVoiceRequest.current !== requestId || recognitionFailed) return;
+          const recognized = finalText.trim();
+          if (!recognized) {
+            setPreferenceVoice({ transcript:baseTranscript, status:'failed' });
+            say('没有识别到内容，请再试一次或直接输入文字');
+            return;
+          }
+          setPreferenceVoice({ transcript:appendRecognizedText(baseTranscript, recognized), status:'completed' });
+          say('已识别并写入文字');
+        };
+        recognition.start();
+      } catch {
+        setPreferenceVoice({ transcript:baseTranscript, status:'failed' });
+        say('无法启动麦克风，请检查浏览器权限');
+      }
+    };
+    const applyAndGo = () => { preferenceVoiceRequest.current += 1; preferenceSpeechRecognition.current?.abort?.(); say('已记录你的偏好，进入活动广场'); go('discover', {}, { resetHistory:true }); };
+    const voiceLabel = voiceStatus === 'listening' ? '正在听，再次点击取消' : voiceStatus === 'completed' ? '识别完成，可继续补充' : voiceStatus === 'cancelled' ? '已取消，可重新开始' : voiceStatus === 'failed' ? '识别失败，请使用文字输入' : '点击说话';
+    return <Layout title="AI 助手" bare noHeader><section className="voice-preference"><div className="voice-preference-orb"/><p className="eyebrow">DIVE ASSISTANT</p><h1>最近想参加<br/>什么活动？</h1><p className="voice-preference-copy">用语音或文字告诉我，我会记住你的偏好，再为你挑合适的 Date。</p><section className="voice-input-card glass-strong"><button className={`voice-mic ${voiceStatus === 'listening' ? 'listening' : ''}`} onClick={toggleListening} aria-label={voiceStatus === 'listening' ? '取消录音' : '开始录音'}><svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="1" width="6" height="12" rx="3"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg></button><b>{voiceLabel}</b></section><label className="voice-text-label">或直接输入<textarea value={transcript} placeholder="例如：周末想去看展，预算别太高…" onChange={(event) => setPreferenceVoice({ transcript:event.target.value, status:'idle' })}/></label>{(transcript || voiceStatus === 'listening') && <section className="voice-keywords"><b>AI 提取到的偏好</b><div>{keywords.length ? keywords.map((word) => <span key={word}>{word}</span>) : <span className="placeholder">继续说说你的偏好</span>}</div></section>}<Button kind="primary" className="full" onClick={applyAndGo}>{transcript ? '就用这个偏好' : '跳过，去活动广场'}</Button><p className="voice-disclaimer">语音仅用于本次识别；你可以随时改用文字输入。</p></section></Layout>;
   }
 
   function Discover() {
-    const nextDate = discoverable[(index + 1) % Math.max(discoverable.length, 1)];
-    const inputType = useRef(null);
-    const dismiss = () => { setSkipped((items) => [...items, activeDate.id]); setIndex(index + 1); say('已跳过，换一场看看'); };
-    const like = () => { toggleSave(activeDate.id); setIndex(index + 1); say('已收藏 ♥'); };
-    const goDetail = () => go('detail', { dateId: activeDate.id });
-    const endDrag = () => { if (dragX > 80) like(); else if (dragX < -80) dismiss(); setDragX(0); dragStart.current = null; inputType.current = null; };
-    return <Layout title="广场"><section className="discover-page"><div className="discover-tools"><button className={`discover-tool ${calendarConnected ? 'is-connected' : ''}`} onClick={() => go('dating-plan')} aria-label="Dating Plan" title="Dating Plan">◷</button><button className="discover-tool" onClick={() => setFilterOpen(true)} aria-label="手动筛选" title="手动筛选">☷</button></div>{activeDate ? <><div className="swipe-stage immersive"><div className="swipe-next">{nextDate && <Hero date={nextDate} compact/>}</div><div className="swipe-card" style={{ transform:`translateX(${dragX}px) rotate(${dragX / 22}deg)`, opacity: 1 - Math.abs(dragX) / 760 }} onTouchStart={(e) => { inputType.current = 'touch'; dragStart.current = e.touches[0].clientX; }} onTouchMove={(e) => { if (inputType.current === 'touch' && dragStart.current !== null) setDragX(e.touches[0].clientX - dragStart.current); }} onTouchEnd={(e) => { if (inputType.current === 'touch') { e.preventDefault(); endDrag(); } }} onPointerDown={(e) => { if (inputType.current !== 'touch') { inputType.current = 'pointer'; dragStart.current = e.clientX; e.currentTarget.setPointerCapture(e.pointerId); } }} onPointerMove={(e) => { if (inputType.current === 'pointer' && dragStart.current !== null) setDragX(e.clientX - dragStart.current); }} onPointerUp={() => { if (inputType.current === 'pointer') endDrag(); }} onPointerCancel={() => { if (inputType.current === 'pointer') endDrag(); }}><Hero date={activeDate} onClick={goDetail}/>{dragX < -15 && <span className="swipe-stamp no">NO</span>}{dragX > 15 && <span className="swipe-stamp yes">♥</span>}<div className="compact-choices"><button onClick={(e) => { e.stopPropagation(); e.preventDefault(); dismiss(); }} aria-label="跳过" title="跳过">×</button><button onClick={(e) => { e.stopPropagation(); e.preventDefault(); toggleSave(activeDate.id); say(saved.includes(activeDate.id) ? '已取消收藏' : '已收藏'); }} aria-label="收藏" title="收藏">{saved.includes(activeDate.id) ? '⚑' : '⚐'}</button><button className="yes" onClick={(e) => { e.stopPropagation(); e.preventDefault(); like(); }} aria-label="喜欢" title="喜欢">♥</button></div></div></div><p className="swipe-hint">左滑跳过 · 右滑收藏 · 点击卡片查看详情</p></> : <Empty title="附近暂时没有合适的 Date" copy="调整一下时间、距离或人数偏好，再回来看看。" action="调整筛选" onClick={() => setFilterOpen(true)}/>}</section>{filterOpen && <FilterSheet/>}</Layout>;
+    const nextId = activeDate ? nextActivityId(activeDate.id) : null;
+    const nextDate = discoverable.find((date) => date.id === nextId);
+    const libraryDates = dates.filter((date) => date.source === 'library');
+    const libraryCategories = [...new Set(libraryDates.map((date) => date.activityCategory).filter(Boolean))];
+    const normalizedQuery = libraryQuery.trim().toLowerCase();
+    const filteredLibraryDates = libraryDates.filter((date) => {
+      const matchesQuery = !normalizedQuery || [date.title, date.content, date.location, ...(date.tags || [])].join(' ').toLowerCase().includes(normalizedQuery);
+      const matchesStatus = libraryStatus === 'all' || date.status === libraryStatus;
+      const matchesMode = libraryMode === 'all' || date.mode === libraryMode;
+      const matchesCategory = libraryCategory === 'all' || date.activityCategory === libraryCategory;
+      return matchesQuery && matchesStatus && matchesMode && matchesCategory;
+    });
+    const resetSwipe = () => {
+      swipeGesture.current = null;
+      swipeAnimating.current = false;
+      setSwipeMotion({ x:0, dragging:false, exiting:false });
+    };
+    const completeSwipe = (direction, id) => {
+      if (swipeAnimating.current || !id) return;
+      const nextActivity = nextActivityId(id);
+      const width = swipeGesture.current?.width || 390;
+      swipeAnimating.current = true;
+      suppressCardClickUntil.current = Date.now() + 400;
+      setSwipeMotion({ x:(direction === 'right' ? 1 : -1) * width * 1.2, dragging:false, exiting:true });
+      clearTimeout(swipeTimer.current);
+      swipeTimer.current = setTimeout(async () => {
+        if (direction === 'right') await saveActivity(id, nextActivity);
+        else skipActivity(id, nextActivity);
+        resetSwipe();
+      }, 220);
+    };
+    const onPointerDown = (event) => {
+      if (swipeAnimating.current || event.button !== 0 || event.target.closest('button')) return;
+      const width = event.currentTarget.getBoundingClientRect().width;
+      swipeGesture.current = { pointerId:event.pointerId, startX:event.clientX, width, dragged:false };
+      event.currentTarget.setPointerCapture(event.pointerId);
+      setSwipeMotion({ x:0, dragging:false, exiting:false });
+    };
+    const onPointerMove = (event) => {
+      const gesture = swipeGesture.current;
+      if (!gesture || gesture.pointerId !== event.pointerId || swipeAnimating.current) return;
+      const x = event.clientX - gesture.startX;
+      if (!gesture.dragged && Math.abs(x) <= 8) return;
+      gesture.dragged = true;
+      gesture.x = x;
+      suppressCardClickUntil.current = Date.now() + 350;
+      setSwipeMotion({ x, dragging:true, exiting:false });
+    };
+    const onPointerEnd = (event, cancelled = false) => {
+      const gesture = swipeGesture.current;
+      if (!gesture || gesture.pointerId !== event.pointerId || swipeAnimating.current) return;
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+      if (!cancelled && gesture.dragged && Math.abs(gesture.x || 0) >= gesture.width * .25) {
+        completeSwipe(gesture.x > 0 ? 'right' : 'left', activeDate.id);
+        return;
+      }
+      swipeGesture.current = null;
+      setSwipeMotion({ x:0, dragging:false, exiting:false });
+    };
+    const canOpenActivity = (date) => Boolean(date?.id && currentDate(date.id));
+    const openActivity = (date) => {
+      if (!canOpenActivity(date)) return say('这场活动暂时无法打开');
+      go('detail', { dateId:date.id });
+    };
+    const goDetail = () => {
+      if (Date.now() >= suppressCardClickUntil.current) openActivity(activeDate);
+    };
+    const likeAndOpen = async (date) => {
+      if (!canOpenActivity(date)) return say('这场活动暂时无法打开');
+      const succeeded = await setActivitySaved(date.id, true);
+      if (succeeded) openActivity(date);
+    };
+    const likeImageAndOpen = () => {
+      if (Date.now() >= suppressCardClickUntil.current) likeAndOpen(activeDate);
+    };
+    return <Layout title="广场"><section className={`discover-page ${discoverView === 'list' ? 'library-view' : ''}`}><div className="discover-viewbar"><div><p>DISCOVER LIBRARY</p><b>{libraryDates.length} 场具体活动</b></div><div className="discover-view-toggle" aria-label="浏览方式"><button className={discoverView === 'cards' ? 'active' : ''} onClick={() => setDiscoverView('cards')} aria-label="Feed 卡片浏览" title="Feed 卡片浏览">▣</button><button className={discoverView === 'list' ? 'active' : ''} onClick={() => setDiscoverView('list')} aria-label="列表浏览" title="列表浏览">☷</button></div></div>{discoverView === 'cards' ? <><div className="discover-tools"><button className={`discover-tool ${calendarConnected ? 'is-connected' : ''}`} onClick={() => go('dating-plan')} aria-label="Dating Plan" title="Dating Plan">◷</button><button className="discover-tool" onClick={() => setFilterOpen(true)} aria-label="手动筛选" title="手动筛选">☷</button></div>{activeDate ? <><div className="swipe-stage immersive"><div className="swipe-next" aria-hidden="true">{nextDate && <Hero date={nextDate} compact disabled={!canOpenActivity(nextDate)}/>}</div><div className={`swipe-card ${swipeMotion.dragging ? 'is-dragging' : ''} ${swipeMotion.exiting ? 'is-exiting' : ''} ${canOpenActivity(activeDate) ? '' : 'is-disabled'}`} style={{ transform:`translateX(${swipeMotion.x}px) rotate(${swipeMotion.x / 24}deg)`, opacity:Math.max(.2, 1 - Math.abs(swipeMotion.x) / 760) }} onClick={goDetail} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={(event) => onPointerEnd(event)} onPointerCancel={(event) => onPointerEnd(event, true)}><Hero date={activeDate} onClick={goDetail} onImageClick={likeImageAndOpen} disabled={!canOpenActivity(activeDate)}/>{swipeMotion.x < -15 && <span className="swipe-stamp no">跳过</span>}{swipeMotion.x > 15 && <span className="swipe-stamp yes">收藏</span>}<div className="compact-choices"><button onClick={(event) => { event.stopPropagation(); completeSwipe('left', activeDate.id); }} aria-label="跳过" title="跳过">×</button><button onClick={(event) => { event.stopPropagation(); toggleSave(activeDate.id); }} aria-label={saved.includes(activeDate.id) ? '取消收藏' : '收藏'} title={saved.includes(activeDate.id) ? '取消收藏' : '收藏'}>{saved.includes(activeDate.id) ? '⚑' : '⚐'}</button><button className="yes" onClick={(event) => { event.stopPropagation(); likeAndOpen(activeDate); }} aria-label="喜欢并查看活动" title="喜欢并查看活动">♥</button></div></div></div><p className="swipe-hint">左滑跳过 · 右滑收藏 · 点击卡片查看详情</p></> : <Empty title="附近暂时没有合适的 Date" copy="调整一下时间、距离或人数偏好，再回来看看。" action="调整筛选" onClick={() => setFilterOpen(true)}/>}</> : <><section className="library-filters"><label className="library-search"><span>⌕</span><input value={libraryQuery} onChange={(event) => setLibraryQuery(event.target.value)} placeholder="搜索活动、地点或标签"/></label><div><select aria-label="活动状态" value={libraryStatus} onChange={(event) => setLibraryStatus(event.target.value)}><option value="all">全部状态</option><option value="招募中">招募中</option><option value="已 Lock">已满</option><option value="已结束">已结束</option></select><select aria-label="活动形式" value={libraryMode} onChange={(event) => setLibraryMode(event.target.value)}><option value="all">全部形式</option><option value="one">双人</option><option value="small">多人</option></select></div><select className="library-category" aria-label="活动类别" value={libraryCategory} onChange={(event) => setLibraryCategory(event.target.value)}><option value="all">全部类别</option>{libraryCategories.map((category) => <option value={category} key={category}>{category}</option>)}</select></section><div className="library-result-heading"><span>活动清单</span><small>{filteredLibraryDates.length} / {libraryDates.length}</small></div>{filteredLibraryDates.length ? <div className="library-list">{filteredLibraryDates.map((date) => <ActivityLibraryRow date={date} key={date.id}/>)}</div> : <Empty title="没有匹配的活动" copy="换一个关键词或清除筛选条件再看看。" action="清除筛选" onClick={() => { setLibraryQuery(''); setLibraryStatus('all'); setLibraryMode('all'); setLibraryCategory('all'); }}/>}</>}</section>{filterOpen && <FilterSheet/>}</Layout>;
   }
-  function FilterSheet() { return <Sheet close={() => setFilterOpen(false)}><section className="light-filter"><p className="eyebrow">DISCOVER</p><h2>Find a Date</h2><p className="muted">日历是自动筛选；下面的三个字段可以随时手动覆盖。</p>{calendarConnected ? <button className="calendar-status" onClick={() => { setFilters({ ...filters, time:'本周可约' }); say('已优先使用日历空档'); }}><span>✓</span><div><b>{calendarChoice} Calendar 已同步</b><small>优先展示这周有空的时间</small></div><i>›</i></button> : <button className="calendar-status" onClick={() => { setFilterOpen(false); go('dating-plan'); }}><span>◷</span><div><b>连接日历自动筛选</b><small>避开已有安排，随时可断开</small></div><i>›</i></button>}<div className="manual-filter-fields"><label>时间<select value={filters.time} onChange={(event) => setFilters({ ...filters, time:event.target.value })}><option>本周可约</option><option>今天</option><option>本周末</option><option>下周</option></select></label><label>距离<select value={filters.distance} onChange={(event) => setFilters({ ...filters, distance:event.target.value })}><option>1 km</option><option>3 km</option><option>5 km</option><option>10 km</option><option>全城</option></select></label><label>形式<select value={filters.modes.length === 1 ? filters.modes[0] : 'all'} onChange={(event) => setFilters({ ...filters, modes:event.target.value === 'all' ? ['one','small'] : [event.target.value] })}><option value="all">1v1 与 Small Date</option><option value="one">仅 1v1 Date</option><option value="small">仅 Small Date</option></select></label></div><div className="sheet-actions"><Button onClick={() => setFilters({ time:'本周末', distance:'3 km', modes:['one','small'] })}>重置</Button><Button kind="primary" onClick={() => { setIndex(0); setFilterOpen(false); say('已更新 Date 偏好'); }}>完成</Button></div></section></Sheet>; }
+  function ActivityLibraryRow({ date }) {
+    const isSaved = saved.includes(date.id);
+    const canOpen = Boolean(date?.id && currentDate(date.id));
+    const cardImage = date.hostImage || date.coverImage;
+    return <article className={`library-row ${canOpen ? '' : 'is-disabled'}`}><button className="library-row-main" disabled={!canOpen} onClick={() => canOpen && go('detail', { dateId:date.id })}><span className={`library-cover library-cover-${date.cover}`}>{cardImage && !failedCoverIds.includes(date.id) && <img src={cardImage} alt="" onError={() => setFailedCoverIds((ids) => ids.includes(date.id) ? ids : [...ids, date.id])}/>}</span><span className="library-row-copy"><span className="library-row-meta"><em>{date.activityCategory}</em><i className={`status-${date.status === '招募中' ? 'live' : date.status === '已结束' ? 'ended' : 'full'}`}>{date.status === '已 Lock' ? '已满' : date.status}</i></span><b>{date.title}</b><small>{date.time} · {date.location}</small><span className="library-row-facts"><em>{date.mode === 'one' ? '双人' : `${date.capacity} 人`}</em><em>{date.budgetText || `人均 ¥${date.budget}`}</em>{date.applicants > 0 && <em>{date.applicants} 人申请</em>}{!canOpen && <em>活动不可用</em>}</span></span></button><button className={`library-save ${isSaved ? 'saved' : ''}`} disabled={!canOpen} onClick={() => toggleSave(date.id)} aria-label={isSaved ? '取消收藏' : '收藏活动'} title={isSaved ? '取消收藏' : '收藏活动'}>{isSaved ? '⚑' : '⚐'}</button></article>;
+  }
+  function FilterSheet() { return <Sheet close={() => setFilterOpen(false)}><section className="light-filter"><p className="eyebrow">DISCOVER</p><h2>Find a Date</h2><p className="muted">日历是自动筛选；下面的三个字段可以随时手动覆盖。</p>{calendarConnected ? <button className="calendar-status" onClick={() => { setFilters({ ...filters, time:'本周可约' }); say('已优先使用日历空档'); }}><span>✓</span><div><b>{calendarChoice} Calendar 已同步</b><small>优先展示这周有空的时间</small></div><i>›</i></button> : <button className="calendar-status" onClick={() => { setFilterOpen(false); go('dating-plan'); }}><span>◷</span><div><b>连接日历自动筛选</b><small>避开已有安排，随时可断开</small></div><i>›</i></button>}<div className="manual-filter-fields"><label>时间<select value={filters.time} onChange={(event) => setFilters({ ...filters, time:event.target.value })}><option>本周可约</option><option>今天</option><option>本周末</option><option>下周</option></select></label><label>距离<select value={filters.distance} onChange={(event) => setFilters({ ...filters, distance:event.target.value })}><option>1 km</option><option>3 km</option><option>5 km</option><option>10 km</option><option>全城</option></select></label><label>形式<select value={filters.modes.length === 1 ? filters.modes[0] : 'all'} onChange={(event) => setFilters({ ...filters, modes:event.target.value === 'all' ? ['one','small'] : [event.target.value] })}><option value="all">1v1 与 Small Date</option><option value="one">仅 1v1 Date</option><option value="small">仅 Small Date</option></select></label></div><div className="sheet-actions"><Button onClick={() => setFilters({ time:'本周末', distance:'3 km', modes:['one','small'] })}>重置</Button><Button kind="primary" onClick={() => { setCurrentActivityId(null); setFilterOpen(false); say('已更新 Date 偏好'); }}>完成</Button></div></section></Sheet>; }
   function ChoiceGroup({ label, values, labels = {}, selected, onClick, multi }) { return <section className="choice-group"><b>{label}</b><div>{values.map((value) => <button className={selected.includes(value) ? 'selected' : ''} key={value} onClick={() => onClick(value)}>{labels[value] || value}</button>)}</div></section>; }
   function MyActivities() {
     const joined = dates.filter((date) => date.attendees.includes(me) || (me === 'vivi' && ['申请中','待支付 Lock fee'].includes(appFor(date.id)?.status)));
@@ -357,7 +799,46 @@ function App() {
   function Stepper({ step }) { return <div className="stepper">{[1,2,3].map((item) => <><i className={item <= step ? 'active' : ''} key={`i${item}`}>{item}</i>{item < 3 && <span key={`s${item}`}/>}</>)}</div>; }
   function FormInput({ label, area, value, onChange, type = 'text' }) { return <label>{label}{area ? <textarea value={value} onChange={(e) => onChange(e.target.value)}/> : <input type={type} value={value} onChange={(e) => onChange(e.target.value)}/>}</label>; }
   function Edit({ date }) { const [draft, setDraft] = useState({ description:date.description, time:date.time, location:date.location, budget:date.budget, lockFee:date.lockFee }); const important = draft.time !== date.time || draft.location !== date.location || Number(draft.budget) !== date.budget || Number(draft.lockFee) !== date.lockFee; return <Layout title="修改 Date" back bare><section className="card form"><p className="eyebrow">硬规则会判断变更等级</p><h2>{date.title}</h2><div className={`notice ${important ? 'warning' : ''}`}><b>{important ? '重要修改' : '简单修改'}</b><br/>{important ? '时间、地点、预算或 Lock fee 已改变。已确认 Guest 会进入「待重新确认」，默认勾选通知和退出 / 退款路径。' : '仅修改活动描述时，向已申请 / 已确认用户发送轻提示。'}</div><FormInput label="活动描述" area value={draft.description} onChange={(description) => setDraft({ ...draft, description })}/><FormInput label="时间" value={draft.time} onChange={(time) => setDraft({ ...draft, time })}/><FormInput label="区域" value={draft.location} onChange={(location) => setDraft({ ...draft, location })}/><FormInput label="预算" type="number" value={draft.budget} onChange={(budget) => setDraft({ ...draft, budget })}/><FormInput label="Lock fee" type="number" value={draft.lockFee} onChange={(lockFee) => setDraft({ ...draft, lockFee })}/><label className="check"><input type="checkbox" checked readOnly/>默认通知所有已申请 / 已 Lock 用户</label><Button kind="primary" className="full" onClick={() => { updateDate(date.id, { ...draft, budget:Number(draft.budget), lockFee:Number(draft.lockFee), status:important ? '待重新确认' : date.status }); addNotice(important ? 'Date 有重要变更，请重新确认' : 'Date 描述已更新', important ? '请确认新安排、退出或申请退款。' : 'Host 更新了活动描述。', date.id); say(important ? '重要修改已发布，已确认 Guest 待重新确认' : '描述已更新，已发送轻提示'); go('detail',{dateId:date.id}); }}>发布修改</Button></section></Layout>; }
-  function Invite({ date }) { return <Layout title="Dive Invite" back bare><section className="invite"><img src="/dive-icon.png"/><p>已确认参与</p><h1>{date.title}</h1><div><b>{date.time}</b><span>{date.exact}</span></div><div><b>Guest</b><span>{people.vivi.name}</span></div><div><b>Lock fee</b><span>¥{date.lockFee} · 已支付</span></div><Button kind="primary" className="full" onClick={() => newChat(date.host, date.id)}>进入活动 IM</Button></section></Layout>; }
+  function Invite({ date }) {
+    const host = people[date.host];
+    const ticketId = `DIVE-${String(date.id).toUpperCase().replace(/[^A-Z0-9]/g, '')}`;
+    const qrCells = Array.from({ length:81 }, (_, index) => {
+      const row = Math.floor(index / 9);
+      const col = index % 9;
+      const finder = (row < 3 && col < 3) || (row < 3 && col > 5) || (row > 5 && col < 3);
+      const active = finder || ((index * 7 + date.title.length + ticketId.length) % 5 < 2);
+      return <i className={active ? 'on' : ''} key={index}/>;
+    });
+    return <Layout title="Dive Invite" back bare><section className="invite-shell">
+      <p className="eyebrow">LOCK FEE PAID</p>
+      <h1>Your Dive invitation</h1>
+      <article className="invite-ticket" aria-label={`${date.title} invitation ticket`}>
+        <div className="ticket-cut top"/>
+        <div className="ticket-cut bottom"/>
+        <section className="ticket-qr-panel">
+          <div className="ticket-brand"><img src="/dive-plan-icon.png" alt="Dive"/></div>
+          <div className="ticket-qr" aria-hidden="true">{qrCells}<b>D</b></div>
+          <p>Show this invite after the Lock fee is confirmed.</p>
+        </section>
+        <section className="ticket-info-panel">
+          <div className="ticket-status"><span>已支付 Lock fee</span><b>¥{date.lockFee || 0}</b></div>
+          <h2>{date.title}</h2>
+          <p>{date.content}</p>
+          <div className="ticket-meta-grid">
+            <span><b>DATE</b><small>{date.time}</small></span>
+            <span><b>PLACE</b><small>{date.exact || date.location}</small></span>
+            <span><b>HOST</b><small>{host?.name || 'Host'}</small></span>
+            <span><b>GUEST</b><small>{people.vivi.name}</small></span>
+          </div>
+          <div className="ticket-footer">
+            <span>{ticketId}</span>
+            <small>{date.payment} · {modeName[date.mode]}</small>
+          </div>
+        </section>
+      </article>
+      <Button kind="primary" className="full invite-im-button" onClick={() => newChat(date.host, date.id)}>进入活动 IM</Button>
+    </section></Layout>;
+  }
   function IM() {
     const priorityOptions = [['activity','活动优先'], ['host','我是 Host 优先'], ['guest','我是 Guest 优先']];
     const onlyOptions = [['activity','仅看活动'], ['host','仅看我是 Host'], ['guest','仅看我是 Guest']];
@@ -379,10 +860,10 @@ function App() {
   function Chat({ chat }) {
     const [text,setText] = useState('');
     const [reactionTarget,setReactionTarget] = useState(null);
+    useEffect(() => { markChatRead(chat.id); }, [chat.id]);
     const context = chatContext(chat);
     const other = people[chat.with];
     const otherRole = context?.host === chat.with ? 'Host' : 'Guest';
-    markChatRead(chat.id);
     return <Layout title={chat.type === 'group' ? chat.name : other?.name} back bare><section className="chat-v2"><section className="chat-identity"><button onClick={() => go('profile', { userId:chat.with })}>{chat.type === 'group' ? <span className="avatar group-avatar">◎</span> : <Avatar id={chat.with}/>}<span><b>{chat.type === 'group' ? chat.name : other?.name}</b><small>{chat.type === 'group' ? '活动群聊' : '活动关系中的 1v1 对话'}</small></span></button><button onClick={() => setChatActionId(chat.id)} aria-label="更多会话操作">•••</button></section>{context && <section className="shared-context"><button className="shared-context-main" onClick={() => go('detail',{dateId:context.id})}><p>你们近期共同参与</p><b>{context.title}</b><small>{context.time} · {context.location}</small><span>{other?.name || '对方'} 是本活动的 {otherRole}</span><i>查看活动 ›</i></button><button className="context-forward" onClick={() => forwardActivity(chat.id,context.id)} aria-label="转发当前活动卡">↗</button>{chat.dateIds.length > 1 && <button className="context-switch" onClick={() => setContextPickerId(chat.id)}>⌄</button>}</section>}<div className="messages chat-messages">{chat.messages.map((message,index) => <MessageBubble key={`${message.type}-${index}`} message={message} chat={chat} reactionOpen={reactionTarget === index} onReactionOpen={() => setReactionTarget(reactionTarget === index ? null : index)} onReact={(emoji) => { toggleMessageReaction(chat.id,index,emoji); setReactionTarget(null); }} onForward={(dateId) => forwardActivity(chat.id,dateId)}/>)}</div><form className="message-input message-input-v2" onSubmit={(event) => { event.preventDefault(); postMessage(chat.id,text); setText(''); }}><input value={text} onChange={(event) => setText(event.target.value)} placeholder="输入消息……"/><button className="send-message" aria-label="发送消息">↑</button><button className="plus-message" type="button" onClick={() => setChatPlusId(chat.id)} aria-label="更多消息类型">＋</button></form></section></Layout>;
   }
 
@@ -395,7 +876,7 @@ function App() {
   }
   function ProfileV2({ userId }) { const profileId = userId || me; const user = people[profileId]; const mine = profileId === me; const joined = dates.filter((date) => date.attendees.includes(profileId)).length; const hosted = dates.filter((date) => date.host === profileId).length; const visibleMemories = memory.length ? memory : [null, null, null]; return <Layout title={mine ? 'Profile' : user.name} back={!mine}><section className="profile-scene"><div className="profile-orb one"/><div className="profile-orb two"/><div className="profile-avatar"><Avatar id={profileId}/></div><span className="handle">@{user.name.toLowerCase()}</span>{mine && <button className="profile-edit" onClick={() => go('onboarding')}>Edit Profile</button>}</section><section className="profile-glass"><div className="glass-grip"/><div className="profile-title"><div><h2>{user.name}<small> · {user.age}</small></h2><span>{user.city} · {user.intent}</span></div><button className="star-button">✦</button></div><p className="profile-intro">{user.intro}</p><div className="profile-stats"><span><b>{joined}</b><small>参与</small></span><span><b>{hosted}</b><small>发起</small></span><span><b>{memory.length}</b><small>活动照片</small></span></div><div className="pills">{user.interests.map((interest) => <Pill key={interest}>{interest}</Pill>)}</div><div className="profile-memory-strip">{visibleMemories.map((url,index) => url ? <img src={url} key={index}/> : <span key={index} className={`memory-placeholder p${index}`}>活动<br/>照片</span>)}<button onClick={() => go('feedback')} className="memory-more">＋</button></div><p className="profile-note">Dating 意图：{user.intent} · 只展示公开活动记忆</p></section>{mine && <section className="profile-actions"><Button onClick={() => go('onboarding')}>✎ 编辑 Dating Profile</Button><Button onClick={() => go('feedback')}>活动后反馈</Button></section>}<section className="block profile-history"><div className="heading"><h3>我的 Date 历史</h3><span>只显示已确认 / 已结束</span></div>{dates.filter((date) => date.host === profileId || date.attendees.includes(profileId)).slice(0,3).map((date) => <button key={date.id} onClick={() => go('detail',{dateId:date.id})}><span>{date.cover === 'flowers' ? '✿' : '✦'}</span><div><b>{date.title}</b><small>{date.time} · {modeName[date.mode]} · {date.status}</small></div><i>›</i></button>)}</section></Layout>; }
   function Profile({ userId }) { const user = people[userId || me]; const mine = (userId || me) === me; return <Layout title={mine ? 'Profile' : user.name} back={!mine}><section className="profile-card"><Avatar id={userId || me}/><div><h2>{user.name} · {user.age}</h2><p>{user.city} · {user.intent}</p></div></section><section className="block"><h3>关于我</h3><p>{user.intro}</p><div className="pills">{user.interests.map((interest) => <Pill tone="accent" key={interest}>{interest}</Pill>)}</div></section><section className="block"><div className="heading"><h3>活动照片</h3><span>仅公开的活动记忆</span></div>{memory.length ? <div className="memory-grid">{memory.map((url,index) => <img src={url} key={index}/>)}</div> : <p className="muted">还没有公开的活动照片。</p>}</section>{mine && <section className="action-stack"><Button onClick={() => go('onboarding')}>✎ 编辑 Dating Profile</Button><Button onClick={() => go('feedback')}>活动后反馈</Button></section>}</Layout>; }
-  function Onboarding() { const [step,setStep]=useState(1); return <Layout title="Dating Profile" back bare><Stepper step={step}/><section className="card form"><p className="eyebrow">{step} / 3</p><img className="onboard-logo" src="/dive-icon.png"/>{step===1 && <><h2>先让人认识真实的你</h2><FormInput label="昵称" value="Vivi" onChange={() => {}}/><FormInput label="城市" value="上海" onChange={() => {}}/><FormInput label="一句自我介绍" area value="喜欢把周末过成一张小小的邀请函。" onChange={() => {}}/></>}{step===2 && <><h2>你现在期待什么？</h2><ChoiceGroup label="Dating 意图" values={['认真恋爱','想认识一个特别的人','顺其自然看感觉','先一起出去玩']} selected={['想认识一个特别的人']} onClick={() => {}}/><ChoiceGroup label="个人标签" values={['独立电影','散步','烘焙','书店','爵士','摄影']} selected={['独立电影','散步','烘焙']} multi onClick={() => {}}/></>}{step===3 && <><h2>你愿意怎样开始认识？</h2><ChoiceGroup label="至少 3 个活动类型" values={['展览','书店','咖啡','徒步','吃饭','音乐']} selected={['展览','书店','咖啡']} multi onClick={() => {}}/><ChoiceGroup label="人数偏好" values={['1v1','3–5 人 Small Date','都可以']} selected={['都可以']} onClick={() => {}}/></>}<div className="sheet-actions">{step > 1 && <Button onClick={() => setStep(step - 1)}>返回</Button>}<Button kind="primary" onClick={() => step < 3 ? setStep(step + 1) : (say('Your Dive is ready'),go('discover'))}>{step < 3 ? '下一步' : '完成，开始探索'}</Button></div></section></Layout>; }
+  function Onboarding() { const [step,setStep]=useState(1); return <Layout title="Dating Profile" back bare><Stepper step={step}/><section className="card form"><p className="eyebrow">{step} / 3</p><img className="onboard-logo" src="/dive-plan-icon.png" alt="Dive"/>{step===1 && <><h2>先让人认识真实的你</h2><FormInput label="昵称" value="Vivi" onChange={() => {}}/><FormInput label="城市" value="上海" onChange={() => {}}/><FormInput label="一句自我介绍" area value="喜欢把周末过成一张小小的邀请函。" onChange={() => {}}/></>}{step===2 && <><h2>你现在期待什么？</h2><ChoiceGroup label="Dating 意图" values={['认真恋爱','想认识一个特别的人','顺其自然看感觉','先一起出去玩']} selected={['想认识一个特别的人']} onClick={() => {}}/><ChoiceGroup label="个人标签" values={['独立电影','散步','烘焙','书店','爵士','摄影']} selected={['独立电影','散步','烘焙']} multi onClick={() => {}}/></>}{step===3 && <><h2>你愿意怎样开始认识？</h2><ChoiceGroup label="至少 3 个活动类型" values={['展览','书店','咖啡','徒步','吃饭','音乐']} selected={['展览','书店','咖啡']} multi onClick={() => {}}/><ChoiceGroup label="人数偏好" values={['1v1','3–5 人 Small Date','都可以']} selected={['都可以']} onClick={() => {}}/></>}<div className="sheet-actions">{step > 1 && <Button onClick={() => setStep(step - 1)}>返回</Button>}<Button kind="primary" onClick={() => step < 3 ? setStep(step + 1) : (say('Your Dive is ready'),go('discover'))}>{step < 3 ? '下一步' : '完成，开始探索'}</Button></div></section></Layout>; }
   function Feedback() { const date=currentDate('d4'); const [photos,setPhotos] = useState([]); function pick(e){ const files=[...e.target.files].slice(0,9); Promise.all(files.map((file)=>new Promise((resolve)=>{ const reader=new FileReader(); reader.onload=()=>resolve(reader.result); reader.readAsDataURL(file); }))).then((urls)=>setPhotos(urls)); } return <Layout title="活动后" back><section className="date-summary"><b>{date.title}</b><span>{date.time} · 已结束</span></section><div className="feedback-tabs"><button className={feedbackTab==='rating'?'active':''} onClick={()=>setFeedbackTab('rating')}>三问评价</button><button className={feedbackTab==='host'?'active':''} onClick={()=>setFeedbackTab('host')}>给 Host 反馈</button><button className={feedbackTab==='connection'?'active':''} onClick={()=>setFeedbackTab('connection')}>双向续联</button></div>{feedbackTab==='rating' && <section className="card form"><p className="eyebrow">P0 三问 · 可跳过</p><h2>这场 Date 感觉如何？</h2><Select label="活动体验" options={['很好','还不错','一般','不太符合预期']}/><Select label="还愿意参加类似的 Date 吗？" options={['愿意','可以再看看','暂不']}/><Select label="还愿意继续认识活动里的人吗？" options={['愿意','可以再聊聊','暂不']}/><Button kind="primary" className="full" onClick={()=>{setFeedbackSent({...feedbackSent,rating:true});say('评价已完成')}}>{feedbackSent.rating?'已完成':'完成评价'}</Button></section>}{feedbackTab==='host' && <section className="card form"><p className="eyebrow">私密发送给 Host</p><h2>给这场 Date 一点反馈</h2><div className="notice"><b>不是 Dating 评价</b><br/>提交后会以私密消息发送到你与 Host 的活动 IM。</div><Select label="与描述相符吗？" options={['很符合','基本符合','不太符合']}/><label>想对 Host 说<textarea placeholder="可选，友好且具体的反馈会更有帮助。"/></label><Button kind="primary" className="full" onClick={()=>{setFeedbackSent({...feedbackSent,host:true});say('已私密发送给 Host')}}>{feedbackSent.host?'已发送':'私密发送给 Host'}</Button></section>}{feedbackTab==='connection' && <section className="card form"><p className="eyebrow">Dating 双向续联</p><h2>只由双方选择决定下一步</h2><div className="notice"><b>仅系统可见</b><br/>不会向对方展示单方选择。只有双方对「愿意再见」或「愿意继续聊天」互选后才解锁下一步。</div><div className="person-card"><Avatar id="jun"/><span>Jun · 本场 1v1 Date 对象</span></div><Select label="本次相处舒适度" options={['5 · 很舒服','4 · 不错','3 · 一般','2 · 有点不适','1 · 不舒服']}/><Select label="是否愿意再见" options={['愿意','可以再聊聊','不继续']}/><Select label="是否愿意继续私聊" options={['愿意','暂不']}/><Select label="是否愿意互相公开联系方式" options={['愿意','暂不']}/><Button kind="primary" className="full" onClick={()=>{setFeedbackSent({...feedbackSent,connection:true});say('私密选择已保存；单方选择不会对外展示')}}>{feedbackSent.connection?'已保存':'提交私密选择'}</Button></section>}<section className="card form memory-form"><p className="eyebrow">活动记忆 · 最多 9 张</p><h2>留下一点那天的样子</h2><div className="notice">公开的照片会展示在你的 Profile 照片专区，并链接回这场 Date；不会包含参与者名单、评分或私密地点。</div><label className="upload">＋<input type="file" accept="image/*" multiple onChange={pick}/><small>上传活动记忆</small></label>{photos.length ? <><div className="memory-grid">{photos.map((photo,index)=><img src={photo} key={index}/>)}</div><Button kind="primary" className="full" onClick={()=>{setMemory(photos);say('活动记忆已保存，公开照片已展示在 Profile')}}>保存活动记忆</Button></> : null}</section></Layout>; }
   function Select({ label, options }) { return <label>{label}<select>{options.map((option)=><option key={option}>{option}</option>)}</select></label>; }
 
@@ -424,7 +905,8 @@ function App() {
 
   function ProfilePhoto({ photo, className = '' }) {
     const uploaded = photo?.startsWith?.('data:') || photo?.startsWith?.('blob:');
-    return <span className={`profile-photo ${uploaded ? 'uploaded' : `photo-${photo || 'portrait'}`} ${className}`}>{uploaded ? <img src={photo} alt="Profile 照片"/> : <i>{photo === 'coffee' ? '☕' : photo === 'city' ? '✦' : photo?.startsWith?.('moment') ? '◌' : 'V'}</i>}</span>;
+    const hasImage = uploaded || photo?.startsWith?.('/profile-avatars/');
+    return <span className={`profile-photo ${hasImage ? 'uploaded' : `photo-${photo || 'portrait'}`} ${className}`}>{hasImage ? <img src={photo} alt="Profile 照片"/> : <i>{photo === 'coffee' ? '☕' : photo === 'city' ? '✦' : photo?.startsWith?.('moment') ? '◌' : 'V'}</i>}</span>;
   }
 
   function ProfileHome() {
@@ -506,44 +988,185 @@ function App() {
 
   function DiscardProfileSheet() { return <Sheet close={() => setDiscardProfileEdit(false)}><section className="discard-sheet"><p className="eyebrow">UNSAVED CHANGES</p><h2>放弃这次修改？</h2><p className="muted">你刚刚编辑的 Profile 内容还没有保存。</p><div className="sheet-actions"><Button onClick={() => setDiscardProfileEdit(false)}>继续编辑</Button><Button kind="danger" onClick={() => { setDiscardProfileEdit(false); setProfileDraft(null); goBack(); }}>放弃修改</Button></div></section></Sheet>; }
   function NotificationSheet(){ return <Sheet close={()=>setNotificationOpen(false)}><h2>通知</h2><p className="muted">支付、安全、临近活动和重要变更会保留必要提醒。</p>{notifications.map((note,index)=><button className="note" key={index} onClick={()=>{ setNotifications(notifications.map((item,i)=>i===index?{...item,unread:false}:item)); setNotificationOpen(false); go('detail',{dateId:note.dateId}); }}><i className={note.unread?'unread':''}/><span><b>{note.title}</b><small>{note.body}</small></span></button>)}</Sheet>; }
-  function Sheet({ children, close }) { return <div className="backdrop"><section className="sheet"><button className="close" onClick={close}>×</button>{children}</section></div>; }
+  function Sheet({ children, close }) { return <div className="backdrop"><section className="sheet"><button className="close" onClick={close} aria-label="关闭">×</button>{children}</section></div>; }
   function Empty({ title,copy,action,onClick }) { return <div className="empty"><span>✦</span><h2>{title}</h2><p>{copy}</p><Button kind="primary" onClick={onClick}>{action}</Button></div>; }
 
   function CreateFlowStepper({ step }) { return <div className="create-flow-stepper">{['形式','灵感','补全','规则','Plan','预览','发布'].map((label,index) => <span className={index + 1 <= step ? 'active' : ''} key={label}><i>{index + 1}</i><small>{label}</small></span>)}</div>; }
   function CreateV3() {
     const d = createDraft;
-    const [voiceOpen, setVoiceOpen] = useState(false);
     const [voiceText, setVoiceText] = useState(d.content);
-    const [isListening, setIsListening] = useState(false);
     const [customVibe, setCustomVibe] = useState('');
     const [planRevisionOpen, setPlanRevisionOpen] = useState(false);
     const [revisionNote, setRevisionNote] = useState('');
+    const [coverGeneration, setCoverGeneration] = useState({ loading:false, error:'' });
     const update = (patch) => { setCreateDraft((draft) => ({ ...draft, ...patch })); setCreateDirty(true); };
+    const resetAiCreate = () => setAiCreate({ sessionId:null, revision:1, reply:'', quickReplies:[], missing:[], messages:[], input:'', loading:false, error:'' });
+    const chooseMode = (mode) => { createVoiceRequest.current += 1; clearTimeout(createVoiceTimer.current); createSpeechRecognition.current?.stop?.(); setCreateVoice({ status:'idle' }); update({ mode, capacity:mode === 'one' ? 2 : 3, coverImage:'', coverPrompt:'' }); resetAiCreate(); };
+    const toggleCreateListening = () => {
+      if (createVoice.status === 'listening') {
+        createVoiceRequest.current += 1;
+        clearTimeout(createVoiceTimer.current);
+        createSpeechRecognition.current?.stop?.();
+        setCreateVoice({ status:'cancelled' });
+        say('已取消本次录音');
+        return;
+      }
+      const requestId = ++createVoiceRequest.current;
+      clearTimeout(createVoiceTimer.current);
+      createSpeechRecognition.current?.stop?.();
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!SpeechRecognition) {
+        setCreateVoice({ status:'failed' });
+        say('当前浏览器不支持语音识别，请使用 Chrome 或直接输入文字');
+        return;
+      }
+      setCreateVoice({ status:'listening' });
+      try {
+        const recognition = new SpeechRecognition();
+        createSpeechRecognition.current = recognition;
+        recognition.lang = 'zh-CN';
+        recognition.continuous = false;
+        recognition.interimResults = true;
+        let finalText = '';
+        recognition.onresult = (event) => {
+          let interimText = '';
+          for (let index = event.resultIndex; index < event.results.length; index += 1) {
+            const text = event.results[index][0]?.transcript || '';
+            if (event.results[index].isFinal) finalText += text;
+            else interimText += text;
+          }
+          const recognized = (finalText || interimText).trim();
+          if (!recognized || createVoiceRequest.current !== requestId) return;
+          setVoiceText(recognized);
+        };
+        recognition.onerror = () => {
+          if (createVoiceRequest.current !== requestId) return;
+          setCreateVoice({ status:'failed' });
+          say('识别失败，请直接输入文字');
+        };
+        recognition.onend = () => {
+          if (createVoiceRequest.current !== requestId) return;
+          const recognized = finalText.trim();
+          if (!recognized) {
+            setCreateVoice({ status:'failed' });
+            say('没有识别到内容，请再试一次或直接输入文字');
+            return;
+          }
+          setCreateDraft((draft) => ({ ...draft, content:appendRecognizedText(draft.content, recognized) }));
+          setCreateDirty(true);
+          setVoiceText('');
+          setCreateVoice({ status:'completed' });
+          say('已识别语音输入');
+        };
+        recognition.start();
+      } catch {
+        setCreateVoice({ status:'failed' });
+        say('识别失败，请直接输入文字');
+      }
+    };
+    const sendAiTurn = async (transcript, advance = false) => {
+      const text = transcript.trim();
+      if (!text || aiCreate.loading) return;
+      if (!isSupabaseConfigured) {
+        setAiCreate((state) => ({ ...state, error:'尚未配置 Supabase 项目地址与前端 Publishable Key，当前使用手动编辑模式。' }));
+        if (advance) setCreateStep(3);
+        return;
+      }
+      if (!backendUserId) {
+        setAiCreate((state) => ({ ...state, error:'需要先建立登录会话，才能调用 AI 创建服务。' }));
+        if (advance) setCreateStep(3);
+        return;
+      }
+      setAiCreate((state) => ({ ...state, loading:true, error:'' }));
+      try {
+        const result = await continueDateCreation({ sessionId:aiCreate.sessionId, mode:d.mode, transcript:text, inputRevision:aiCreate.revision });
+        update(aiSlotsToDraft(result.slot_updates));
+        setAiCreate((state) => ({
+          ...state,
+          sessionId:result.session_id,
+          revision:result.input_revision,
+          reply:result.reply,
+          quickReplies:result.quick_replies || [],
+          missing:result.missing_fields_remaining || [],
+          input:'',
+          loading:false,
+          error:'',
+          messages:[...state.messages, { role:'user', text }, { role:'assistant', text:result.reply }]
+        }));
+        if (advance) setCreateStep(3);
+      } catch (error) {
+        console.error('AI creation failed', error);
+        setAiCreate((state) => ({ ...state, loading:false, error:error.message || 'AI 暂时不可用，可以继续手动填写。' }));
+        if (advance) setCreateStep(3);
+      }
+    };
     const toggleVibe = (vibe) => update({ vibe: d.vibe.includes(vibe) ? d.vibe.filter((item) => item !== vibe) : d.vibe.length < 3 ? [...d.vibe, vibe] : d.vibe });
     const addCustomVibe = () => { const next = customVibe.trim(); if (!next) return; if (d.vibe.includes(next)) return setCustomVibe(''); if (d.vibe.length >= 3) return say('活动氛围最多选择 3 个'); update({ vibe:[...d.vibe, next] }); setCustomVibe(''); };
     const coreValid = d.time.trim() && d.location.trim() && Number(d.budget) >= 0 && d.payment && d.expectation.trim() && d.vibe.length && (!d.lockFeeEnabled || Number(d.fee) > 0);
+    const ensureCoverImage = async () => {
+      const fallback = d.mode === 'one' ? '/date-plan-assets/date-plan-one.png' : '/date-plan-assets/date-plan-small.png';
+      if (!isSupabaseConfigured || !backendUserId) {
+        update({ coverImage:d.coverImage || fallback, coverPrompt:d.coverPrompt || `${d.title} · ${d.content} · ${d.vibe.join('、')}` });
+        return true;
+      }
+      setCoverGeneration({ loading:true, error:'' });
+      try {
+        const cover = await generateDateCover({ mode:d.mode, title:d.title, content:d.content, vibe:d.vibe, location:d.location, capacity:d.capacity });
+        update({ coverImage:cover.cover_image_url, coverPrompt:cover.cover_prompt });
+        setCoverGeneration({ loading:false, error:'' });
+        say(cover.mock ? '已生成封面占位图' : 'AI 封面图已生成');
+        return true;
+      } catch (error) {
+        console.error('Date cover generation failed', error);
+        update({ coverImage:d.coverImage || fallback, coverPrompt:d.coverPrompt || `${d.title} · ${d.content} · ${d.vibe.join('、')}` });
+        setCoverGeneration({ loading:false, error:error.message || 'AI 封面图生成失败，已使用本地封面' });
+        say('AI 封面图生成失败，已使用本地封面');
+        return false;
+      }
+    };
+    const generatePlan = async () => {
+      if (!coreValid) {
+        say(d.lockFeeEnabled && !Number(d.fee) ? '开启 Lock fee 后，请填写金额' : '请补齐时间、区域、预算、付费方式和参与者期待');
+        return;
+      }
+      await ensureCoverImage();
+      setCreateStep(5);
+    };
     const backFromCreate = () => { if (createDirty) setCreateExitPrompt(true); else goBack(); };
-    const publish = () => {
-      const next = { id:`d${Date.now()}`, host:me, mode:d.mode, title:d.title, cover:'custom', vibe:d.vibe, content:d.content, description:d.description, time:d.time, timeFlexible:d.timeFlexible, location:d.location, locationFlexible:d.locationFlexible, exact:d.exact || 'Host 将在 Lock 后开放精确集合点', budget:Number(d.budget), budgetScope:d.budgetScope, payment:d.payment, lockFee:d.lockFeeEnabled ? Number(d.fee) : 0, lockFeeEnabled:d.lockFeeEnabled, refund:d.refundPolicy, expectation:d.expectation, capacity:d.capacity, attendees:[], status:'招募中', rhythm:d.groupRhythm, icebreaker:d.icebreaker, selectionRule:d.selectionRule, groupChatRule:d.groupChatRule, confirmationTiming:d.confirmationTiming, exitPolicy:d.exitPolicy, visibility:d.visibility };
+    const publish = async () => {
+      let next = { id:`d${Date.now()}`, host:me, mode:d.mode, title:d.title, cover:'custom', coverImage:d.coverImage, coverPrompt:d.coverPrompt, vibe:d.vibe, content:d.content, description:d.description, time:d.time, timeFlexible:d.timeFlexible, location:d.location, locationFlexible:d.locationFlexible, exact:d.exact || 'Host 将在 Lock 后开放精确集合点', budget:Number(d.budget), budgetScope:d.budgetScope, payment:d.payment, lockFee:d.lockFeeEnabled ? Number(d.fee) : 0, lockFeeEnabled:d.lockFeeEnabled, refund:d.refundPolicy, expectation:d.expectation, capacity:d.capacity, attendees:[], status:'招募中', rhythm:d.groupRhythm, icebreaker:d.icebreaker, selectionRule:d.selectionRule, groupChatRule:d.groupChatRule, confirmationTiming:d.confirmationTiming, exitPolicy:d.exitPolicy, visibility:d.visibility };
+      if (isSupabaseConfigured) {
+        if (!backendUserId) return say('请先登录后再发布 Date');
+        try {
+          const remote = await createDate(backendUserId, d);
+          next = { ...next, ...remote, host:me, hostUserId:backendUserId };
+        } catch (error) {
+          console.error('Date publish failed', error);
+          say('Date 发布失败，请检查网络后重试');
+          return;
+        }
+      }
       setDates((items) => [next, ...items]);
-      setPublishConfirm(false); setCreateDirty(false); setCreateDraft(makeCreateDraft()); setCreateStep(1); setMyTab('hosted');
+      createVoiceRequest.current += 1; clearTimeout(createVoiceTimer.current); setCreateVoice({ status:'idle' });
+      setPublishConfirm(false); setCreateDirty(false); setCreateDraft(makeCreateDraft()); setCreateStep(1); setMyTab('hosted'); resetAiCreate();
       say('Date 已发布，等待你手动审核 Apply'); go('publish-success', { dateId:next.id });
     };
     const planModeCopy = d.mode === 'one' ? '为两个人留出真实、不过度用力的相处时间。' : `为 Host 和 ${d.capacity - 1} 位 Guest 留出自然认识彼此的空间。`;
     return <Layout title="创建 Date" back bare onBack={backFromCreate}><CreateFlowStepper step={publishConfirm ? 7 : createStep}/>
-      {createStep === 1 && <section className="card form glass-strong create-stage"><p className="eyebrow">A0 · 选择见面方式</p><h2>你想怎么认识？</h2><p className="muted">先决定是一场专注的 1v1，还是一场有边界的小型多人 Date。</p><div className="mode-buttons create-mode-cards"><button className={d.mode === 'one' ? 'selected' : ''} onClick={() => update({ mode:'one', capacity:2 })}><b>一对一约会</b><span>1v1 Date</span><small>更专注地认识一个人；Host 就是约会对象。</small></button><button className={d.mode === 'small' ? 'selected' : ''} onClick={() => update({ mode:'small', capacity:3 })}><b>小型多人约会</b><span>Small Date</span><small>Host 与 2–4 位 Guest 在具体场景里自然认识。</small></button></div><Button kind="primary" className="full" onClick={() => setCreateStep(2)}>继续</Button></section>}
-      {createStep === 2 && <section className="card form glass-strong create-stage"><p className="eyebrow">{d.mode === 'one' ? 'C1' : 'M1'} · 灵感输入</p><h2>{d.mode === 'one' ? '这次，想怎么认识一个人？' : '你想和怎样的一群人认识？'}</h2>{d.mode === 'small' && <ChoiceGroup label="总人数（含 Host）" values={[3,4,5]} selected={[d.capacity]} onClick={(capacity) => update({ capacity:Number(capacity) })}/>}<section className="voice-input-card glass-strong"><button className={`voice-mic ${isListening ? 'listening' : ''}`} onClick={() => { setIsListening(true); const mock = d.mode === 'one' ? '周六下午去逛书店，预算 150，想轻松认识一个喜欢摄影的人。' : '想组织 4 个人周日下午做陶艺，希望轻松认识新朋友。'; setTimeout(() => { update({ content:mock }); setIsListening(false); say('已识别语音输入'); }, 1600); }} aria-label="点击说话"><svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="1" width="6" height="12" rx="3"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg></button><b>{isListening ? '正在听…' : '点击说话'}</b></section><label>或直接输入<textarea value={d.content} placeholder={d.mode === 'one' ? '例如：周六下午去逛书店，预算 150，想轻松认识一个喜欢摄影的人。' : '例如：想组织 4 个人周日下午做陶艺，希望轻松认识新朋友。'} onChange={(event) => update({ content:event.target.value })}/></label><div className="sheet-actions"><Button onClick={() => setCreateStep(1)}>返回</Button><Button kind="primary" onClick={() => d.content.trim() ? setCreateStep(3) : say('先说说想一起做什么')}>继续</Button></div></section>}
-      {createStep === 3 && <section className="card form glass-strong create-stage"><p className="eyebrow">{d.mode === 'one' ? 'C2' : 'M2'} · AI 信息补全</p><h2>我先理解了这些</h2>{d.content.trim().length > 3 && <><section className="keyword-chips"><b>AI 提取到的关键词</b><div>{extractKeywords(d.content).length ? extractKeywords(d.content).map((word) => <span key={word}>{word}</span>) : <span>暂未提取到关键词</span>}</div></section><section className="ai-recommendations"><b>AI 推荐的 Date 计划</b>{generateRecommendations(d.content, d.mode, d.capacity).map((rec, index) => <button className="rec-card" key={index} onClick={() => { update({ title:rec.title, content:rec.content, vibe:rec.vibe, budget:rec.budget, location:rec.location }); say(`已采用：${rec.title}`); }}><b>{rec.title}</b><p>{rec.content}</p><div className="rec-tags">{rec.vibe.map((v) => <span key={v}>{v}</span>)}</div><div className="rec-meta"><span>约 ¥{rec.budget}</span><span>{rec.location}</span></div></button>)}</section></>}<section className="field-state known"><span>✓ AI 已理解</span><b>活动内容</b><p>{d.content}</p></section><section className="field-state inferred"><span>✦ AI 推断，等你确认</span><b>标题、氛围与对外介绍</b><p>AI 只给建议；最终对外内容始终由你确认。</p></section><section className="field-state missing"><span>下一项需要你确认</span><b>活动如何被别人理解</b><p>完成这三项后，再依次确认时间、地点、费用与参与规则。</p></section><FormInput label="活动标题" value={d.title} onChange={(title) => update({ title })}/><button className="ai-inline-button" onClick={() => update({ title:d.mode === 'one' ? '周末一起在书店慢慢认识' : '午后一起做一件小事' })}>✦ 换一个 AI 标题建议</button><ChoiceGroup label="活动氛围（至少 1 个，最多 3 个）" values={['松弛','有点好奇','温柔','一起动手','城市漫游','不赶时间']} selected={d.vibe} multi onClick={toggleVibe}/><div className="custom-vibe"><input value={customVibe} onChange={(event) => setCustomVibe(event.target.value)} placeholder="自定义氛围，例如：一点浪漫"/><button onClick={addCustomVibe}>添加</button></div><FormInput label="活动描述（对外可见）" area value={d.description} onChange={(description) => update({ description })}/><div className="sheet-actions"><Button onClick={() => setCreateStep(2)}>返回</Button><Button kind="primary" onClick={() => d.title.trim() && d.vibe.length && d.description.trim() ? setCreateStep(4) : say('请补齐标题、至少一个氛围和活动描述')}>确认这些信息</Button></div></section>}
-      {createStep === 4 && <section className="card form glass-strong create-stage"><p className="eyebrow">{d.mode === 'one' ? 'C2 · 行程与费用' : 'M2 / M3 · 行程与参与规则'}</p><h2>把这场 Date 讲清楚</h2><FormInput label="活动时间" value={d.time} onChange={(time) => update({ time })}/><label className="check"><input type="checkbox" checked={d.timeFlexible} onChange={(event) => update({ timeFlexible:event.target.checked })}/>允许模糊时间表达，例如「下周晚上」</label><FormInput label="公开区域" value={d.location} onChange={(location) => update({ location })}/><label className="check"><input type="checkbox" checked={d.locationFlexible} onChange={(event) => update({ locationFlexible:event.target.checked })}/>允许模糊地点表达，例如「静安寺附近」</label><FormInput label="精确集合点（仅 Lock 后可见）" value={d.exact} onChange={(exact) => update({ exact })}/><div className="two-choice"><ChoiceGroup label="预算口径" values={['人均','总预算']} selected={[d.budgetScope]} onClick={(budgetScope) => update({ budgetScope })}/><FormInput label={`预算（${d.budgetScope}）`} type="number" value={d.budget} onChange={(budget) => update({ budget:Number(budget) })}/></div><ChoiceGroup label="付费方式" values={['AA','Host 请客','各自支付']} selected={[d.payment]} onClick={(payment) => update({ payment })}/><section className="fee-choice"><div><b>设置 Lock fee</b><small>仅在你同意 Apply 后，由 Guest 主动支付锁定席位。</small></div><button className={d.lockFeeEnabled ? 'selected' : ''} onClick={() => update({ lockFeeEnabled:!d.lockFeeEnabled })}>{d.lockFeeEnabled ? '已开启' : '未开启'}</button></section>{d.lockFeeEnabled && <FormInput label="Lock fee 金额" type="number" value={d.fee} onChange={(fee) => update({ fee:Number(fee) })}/>}<label>退款 / 取消规则<textarea value={d.refundPolicy} onChange={(event) => update({ refundPolicy:event.target.value })}/></label><FormInput label="对参与者的期待" area value={d.expectation} onChange={(expectation) => update({ expectation })}/>{d.mode === 'small' && <section className="small-date-rules"><h3>Small Date 参与规则</h3><ChoiceGroup label="Guest 选择规则" values={['Host 审核','先到先得','混合']} selected={[d.selectionRule]} onClick={(selectionRule) => update({ selectionRule })}/><ChoiceGroup label="群体交流方式" values={['轻松聊天','有主题流程','安静共处']} selected={[d.groupRhythm]} onClick={(groupRhythm) => update({ groupRhythm })}/><ChoiceGroup label="破冰方式" values={['不需要','轻量即可','需要明确破冰']} selected={[d.icebreaker]} onClick={(icebreaker) => update({ icebreaker })}/><ChoiceGroup label="群聊开放条件" values={['全部 Lock 后自动建群','Host 手动建群','暂不创建群聊']} selected={[d.groupChatRule]} onClick={(groupChatRule) => update({ groupChatRule })}/><FormInput label="预计确认时间" value={d.confirmationTiming} onChange={(confirmationTiming) => update({ confirmationTiming })}/><FormInput label="中途离开说明" area value={d.exitPolicy} onChange={(exitPolicy) => update({ exitPolicy })}/></section>}<ChoiceGroup label="可见范围" values={['公开','仅好友可见']} selected={[d.visibility]} onClick={(visibility) => update({ visibility })}/><div className="sheet-actions"><Button onClick={() => setCreateStep(3)}>返回</Button><Button kind="primary" onClick={() => coreValid ? setCreateStep(5) : say(d.lockFeeEnabled && !Number(d.fee) ? '开启 Lock fee 后，请填写金额' : '请补齐时间、区域、预算、付费方式和参与者期待')}>生成 Date Plan</Button></div></section>}
-      {createStep === 5 && <section className="card form glass-strong create-stage"><p className="eyebrow">{d.mode === 'one' ? 'C3' : 'M4'} · AI Date Plan</p><h2>这是我为你整理的 Date Plan</h2><section className={`date-plan-art ${d.mode}`}><span>{d.mode === 'one' ? '◌' : '◌ ◌ ◌'}</span><b>{d.mode === 'one' ? '两个人走进一场具体的见面' : `${d.capacity} 个人在具体场景里慢慢认识`}</b><small>场景插图会根据活动内容、氛围与人数重新生成。</small></section><div className="plan create-plan"><span>✦</span><h2>{d.title}</h2><p>{d.content}</p></div><div className="plan-privacy"><span>公开给申请人：{d.title}、{d.location}、预算、期待与 Host 公开资料</span><span>Lock 后开放：精确集合点、完整行程和{d.mode === 'small' ? '活动群聊' : '一对一活动 IM'}</span></div><div className="timeline"><p><b>{d.time}{d.timeFlexible ? ' · 时间可协调' : ''}</b><br/><span>在 {d.location} 附近集合</span></p><p><b>{d.content}</b><br/><span>{d.budgetScope}约 ¥{d.budget} · {d.payment} · {d.lockFeeEnabled ? `Lock fee ¥${d.fee}` : '未设置 Lock fee'}</span></p><p><b>自然结束</b><br/><span>{d.exitPolicy}</span></p></div>{d.mode === 'small' && <section className="plan-group-summary"><b>Small Date · {d.capacity} 人</b><span>{d.groupRhythm} · {d.icebreaker} · {d.selectionRule}</span><span>{d.groupChatRule}</span></section>}<section className="plan-reasons"><b>为什么这样安排</b><p>• {planModeCopy}</p><p>• 「{d.location}」先以区域公开，既方便判断，也不提前暴露精确集合点。</p><p>• {d.lockFeeEnabled ? `Lock fee ¥${d.fee} 只在你确认 Guest 后产生，避免无意占位。` : '没有设置 Lock fee，申请通过后直接确认席位。'}</p></section><div className="plan-chips"><button onClick={() => update({ vibe:['松弛','温柔'] })}>更轻松一点</button><button onClick={() => update({ budget:Math.max(0,Number(d.budget) - 20) })}>预算降低</button><button onClick={() => update({ location:'附近室内空间' })}>换成室内</button></div><div className="sheet-actions"><Button onClick={() => setPlanRevisionOpen(true)}>还不是我想要的</Button><Button kind="primary" onClick={() => setCreateStep(6)}>确认这份 Date 方案</Button></div></section>}
+      {createStep === 1 && <section className="card form glass-strong create-stage"><p className="eyebrow">A0 · 选择见面方式</p><h2>你想怎么认识？</h2><p className="muted">先决定是一场专注的 1v1，还是一场有边界的小型多人 Date。</p><div className="mode-buttons create-mode-cards"><button className={d.mode === 'one' ? 'selected' : ''} onClick={() => chooseMode('one')}><b>一对一约会</b><span>1v1 Date</span><small>更专注地认识一个人；Host 就是约会对象。</small></button><button className={d.mode === 'small' ? 'selected' : ''} onClick={() => chooseMode('small')}><b>小型多人约会</b><span>Small Date</span><small>Host 与 2–4 位 Guest 在具体场景里自然认识。</small></button></div><Button kind="primary" className="full" onClick={() => setCreateStep(2)}>继续</Button></section>}
+      {createStep === 2 && <section className="card form glass-strong create-stage"><p className="eyebrow">{d.mode === 'one' ? 'C1' : 'M1'} · 灵感输入</p><h2>{d.mode === 'one' ? '这次，想怎么认识一个人？' : '你想和怎样的一群人认识？'}</h2>{d.mode === 'small' && <ChoiceGroup label="总人数（含 Host）" values={[3,4,5]} selected={[d.capacity]} onClick={(capacity) => update({ capacity:Number(capacity) })}/>}<section className="voice-input-card glass-strong"><button className={`voice-mic ${createVoice.status === 'listening' ? 'listening' : ''}`} onClick={toggleCreateListening} aria-label={createVoice.status === 'listening' ? '取消录音' : '开始录音'}><svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="1" width="6" height="12" rx="3"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg></button><b>{createVoice.status === 'listening' ? '正在听，再次点击取消' : createVoice.status === 'completed' ? '识别完成，可继续补充' : createVoice.status === 'cancelled' ? '已取消，可重新开始' : createVoice.status === 'failed' ? '识别失败，请使用文字输入' : '点击说话'}</b></section><label>或直接输入<textarea value={d.content} placeholder={d.mode === 'one' ? '例如：周六下午去逛书店，预算 150，想轻松认识一个喜欢摄影的人。' : '例如：想组织 4 个人周日下午做陶艺，希望轻松认识新朋友。'} onChange={(event) => update({ content:event.target.value })}/></label><div className="sheet-actions"><Button onClick={() => setCreateStep(1)}>返回</Button><Button kind="primary" disabled={aiCreate.loading} onClick={() => d.content.trim() ? sendAiTurn(d.content, true) : say('先说说想一起做什么')}>{aiCreate.loading ? 'AI 正在理解…' : '让 AI 继续追问'}</Button></div></section>}
+      {createStep === 3 && <section className="card form glass-strong create-stage"><p className="eyebrow">{d.mode === 'one' ? 'C2' : 'M2'} · AI 信息补全</p><h2>{aiCreate.reply ? '继续把这场 Date 聊清楚' : '我先理解了这些'}</h2>{aiCreate.error && <section className="ai-create-error"><b>当前使用手动编辑</b><p>{aiCreate.error}</p></section>}{aiCreate.messages.length > 0 && <section className="ai-create-chat" aria-live="polite">{aiCreate.messages.map((message, index) => <div className={`ai-create-turn ${message.role}`} key={`${message.role}-${index}`}><small>{message.role === 'assistant' ? 'Dive AI' : '你'}</small><p>{message.text}</p></div>)}{aiCreate.loading && <div className="ai-create-turn assistant loading"><small>Dive AI</small><p>正在整理你刚刚补充的信息…</p></div>}</section>}{aiCreate.missing.length > 0 && <section className="ai-missing-fields"><b>还需要确认</b><div>{aiCreate.missing.map((field) => <span key={field}>{aiFieldLabels[field] || field}</span>)}</div></section>}{aiCreate.quickReplies.length > 0 && <div className="ai-quick-replies">{aiCreate.quickReplies.map((reply) => <button key={reply} disabled={aiCreate.loading} onClick={() => sendAiTurn(reply)}>{reply}</button>)}</div>}{aiCreate.reply && <section className="ai-create-composer"><textarea value={aiCreate.input} placeholder="直接回答上面的问题，也可以说“这项待定”" onChange={(event) => setAiCreate((state) => ({ ...state, input:event.target.value }))}/><Button kind="primary" disabled={aiCreate.loading || !aiCreate.input.trim()} onClick={() => sendAiTurn(aiCreate.input)}>发送</Button></section>}{!aiCreate.reply && d.content.trim().length > 3 && <><section className="keyword-chips"><b>本地提取到的关键词</b><div>{extractKeywords(d.content).length ? extractKeywords(d.content).map((word) => <span key={word}>{word}</span>) : <span>暂未提取到关键词</span>}</div></section><section className="ai-recommendations"><b>本地灵感建议</b>{generateRecommendations(d.content, d.mode, d.capacity).map((rec, index) => <button className="rec-card" key={index} onClick={() => { update({ title:rec.title, content:rec.content, vibe:rec.vibe, budget:rec.budget, location:rec.location }); say(`已采用：${rec.title}`); }}><b>{rec.title}</b><p>{rec.content}</p><div className="rec-tags">{rec.vibe.map((v) => <span key={v}>{v}</span>)}</div><div className="rec-meta"><span>约 ¥{rec.budget}</span><span>{rec.location}</span></div></button>)}</section></>}<section className="field-state known"><span>✓ 已记录</span><b>活动内容</b><p>{d.content}</p></section><section className="field-state inferred"><span>✦ 模型建议，等你确认</span><b>标题、氛围与对外介绍</b><p>模型只补全草稿；最终内容和发布动作始终由你确认。</p></section><FormInput label="活动标题" value={d.title} onChange={(title) => update({ title })}/><ChoiceGroup label="活动氛围（至少 1 个，最多 3 个）" values={['松弛','有点好奇','温柔','一起动手','城市漫游','不赶时间']} selected={d.vibe} multi onClick={toggleVibe}/><div className="custom-vibe"><input value={customVibe} onChange={(event) => setCustomVibe(event.target.value)} placeholder="自定义氛围，例如：一点浪漫"/><button onClick={addCustomVibe}>添加</button></div><FormInput label="活动描述（对外可见）" area value={d.description} onChange={(description) => update({ description })}/><div className="sheet-actions"><Button onClick={() => setCreateStep(2)}>返回</Button><Button kind="primary" onClick={() => d.title.trim() && d.vibe.length && d.description.trim() ? setCreateStep(4) : say('请补齐标题、至少一个氛围和活动描述')}>确认这些信息</Button></div></section>}
+      {createStep === 4 && <section className="card form glass-strong create-stage"><p className="eyebrow">{d.mode === 'one' ? 'C2 · 行程与费用' : 'M2 / M3 · 行程与参与规则'}</p><h2>把这场 Date 讲清楚</h2><FormInput label="活动时间" value={d.time} onChange={(time) => update({ time })}/><label className="check"><input type="checkbox" checked={d.timeFlexible} onChange={(event) => update({ timeFlexible:event.target.checked })}/>允许模糊时间表达，例如「下周晚上」</label><FormInput label="公开区域" value={d.location} onChange={(location) => update({ location })}/><label className="check"><input type="checkbox" checked={d.locationFlexible} onChange={(event) => update({ locationFlexible:event.target.checked })}/>允许模糊地点表达，例如「静安寺附近」</label><FormInput label="精确集合点（仅 Lock 后可见）" value={d.exact} onChange={(exact) => update({ exact })}/><div className="two-choice"><ChoiceGroup label="预算口径" values={['人均','总预算']} selected={[d.budgetScope]} onClick={(budgetScope) => update({ budgetScope })}/><FormInput label={`预算（${d.budgetScope}）`} type="number" value={d.budget} onChange={(budget) => update({ budget:Number(budget) })}/></div><ChoiceGroup label="付费方式" values={['AA','Host 请客','各自支付']} selected={[d.payment]} onClick={(payment) => update({ payment })}/><section className="fee-choice"><div><b>设置 Lock fee</b><small>仅在你同意 Apply 后，由 Guest 主动支付锁定席位。</small></div><button className={d.lockFeeEnabled ? 'selected' : ''} onClick={() => update({ lockFeeEnabled:!d.lockFeeEnabled })}>{d.lockFeeEnabled ? '已开启' : '未开启'}</button></section>{d.lockFeeEnabled && <FormInput label="Lock fee 金额" type="number" value={d.fee} onChange={(fee) => update({ fee:Number(fee) })}/>}<label>退款 / 取消规则<textarea value={d.refundPolicy} onChange={(event) => update({ refundPolicy:event.target.value })}/></label><FormInput label="对参与者的期待" area value={d.expectation} onChange={(expectation) => update({ expectation })}/>{d.mode === 'small' && <section className="small-date-rules"><h3>Small Date 参与规则</h3><ChoiceGroup label="Guest 选择规则" values={['Host 审核','先到先得','混合']} selected={[d.selectionRule]} onClick={(selectionRule) => update({ selectionRule })}/><ChoiceGroup label="群体交流方式" values={['轻松聊天','有主题流程','安静共处']} selected={[d.groupRhythm]} onClick={(groupRhythm) => update({ groupRhythm })}/><ChoiceGroup label="破冰方式" values={['不需要','轻量即可','需要明确破冰']} selected={[d.icebreaker]} onClick={(icebreaker) => update({ icebreaker })}/><ChoiceGroup label="群聊开放条件" values={['全部 Lock 后自动建群','Host 手动建群','暂不创建群聊']} selected={[d.groupChatRule]} onClick={(groupChatRule) => update({ groupChatRule })}/><FormInput label="预计确认时间" value={d.confirmationTiming} onChange={(confirmationTiming) => update({ confirmationTiming })}/><FormInput label="中途离开说明" area value={d.exitPolicy} onChange={(exitPolicy) => update({ exitPolicy })}/></section>}<ChoiceGroup label="可见范围" values={['公开','仅好友可见']} selected={[d.visibility]} onClick={(visibility) => update({ visibility })}/>{coverGeneration.error && <section className="ai-create-error"><b>封面图生成提示</b><p>{coverGeneration.error}</p></section>}<div className="sheet-actions"><Button onClick={() => setCreateStep(3)}>返回</Button><Button kind="primary" disabled={coverGeneration.loading} onClick={generatePlan}>{coverGeneration.loading ? '正在生成封面图…' : '生成 Date Plan'}</Button></div></section>}
+      {createStep === 5 && <section className="card form glass-strong create-stage"><p className="eyebrow">{d.mode === 'one' ? 'C3' : 'M4'} · AI Date Plan</p><h2>这是我为你整理的 Date Plan</h2><section className={`date-plan-art ${d.mode} generated-cover`}>{d.coverImage ? <img src={d.coverImage} alt=""/> : <span>{d.mode === 'one' ? '◌' : '◌ ◌ ◌'}</span>}<b>{d.mode === 'one' ? '两个人走进一场具体的见面' : `${d.capacity} 个人在具体场景里慢慢认识`}</b><small>{coverGeneration.loading ? '场景封面正在生成。' : d.coverImage ? '场景封面已根据活动内容、氛围与人数生成。' : '场景封面会根据活动内容、氛围与人数生成。'}</small></section>{coverGeneration.error && <section className="ai-create-error"><b>封面图生成提示</b><p>{coverGeneration.error}</p></section>}<div className="plan create-plan"><span>✦</span><h2>{d.title}</h2><p>{d.content}</p></div><div className="plan-privacy"><span>公开给申请人：{d.title}、{d.location}、预算、期待与 Host 公开资料</span><span>Lock 后开放：精确集合点、完整行程和{d.mode === 'small' ? '活动群聊' : '一对一活动 IM'}</span></div><div className="timeline"><p><b>{d.time}{d.timeFlexible ? ' · 时间可协调' : ''}</b><br/><span>在 {d.location} 附近集合</span></p><p><b>{d.content}</b><br/><span>{d.budgetScope}约 ¥{d.budget} · {d.payment} · {d.lockFeeEnabled ? `Lock fee ¥${d.fee}` : '未设置 Lock fee'}</span></p><p><b>自然结束</b><br/><span>{d.exitPolicy}</span></p></div>{d.mode === 'small' && <section className="plan-group-summary"><b>Small Date · {d.capacity} 人</b><span>{d.groupRhythm} · {d.icebreaker} · {d.selectionRule}</span><span>{d.groupChatRule}</span></section>}<section className="plan-reasons"><b>为什么这样安排</b><p>• {planModeCopy}</p><p>• 「{d.location}」先以区域公开，既方便判断，也不提前暴露精确集合点。</p><p>• {d.lockFeeEnabled ? `Lock fee ¥${d.fee} 只在你确认 Guest 后产生，避免无意占位。` : '没有设置 Lock fee，申请通过后直接确认席位。'}</p></section><div className="plan-chips"><button onClick={() => update({ vibe:['松弛','温柔'] })}>更轻松一点</button><button onClick={() => update({ budget:Math.max(0,Number(d.budget) - 20) })}>预算降低</button><button onClick={() => update({ location:'附近室内空间' })}>换成室内</button><button disabled={coverGeneration.loading} onClick={ensureCoverImage}>{coverGeneration.loading ? '生成中' : '重新生成封面'}</button></div><div className="sheet-actions"><Button onClick={() => setPlanRevisionOpen(true)}>还不是我想要的</Button><Button kind="primary" onClick={() => setCreateStep(6)}>确认这份 Date 方案</Button></div></section>}
       {createStep === 6 && <section className="card form publish-preview create-stage"><p className="eyebrow">{d.mode === 'one' ? 'C4' : 'M5'} · Host 发布预览</p><h2>这就是 Guest 将看到的 Date</h2><Hero date={{ ...d, host:me, cover:'custom', attendees:[], status:'招募中', lockFee:d.lockFeeEnabled ? d.fee : 0, refund:d.refundPolicy }} compact/><section className="host-preview-grid"><div><small>Guest 可见的 Host Profile</small>{d.hostProfileFields.map((field) => <span key={field}>✓ {field}</span>)}</div><div><small>申请后的规则</small><span>✓ 你手动审核 Apply</span><span>✓ {d.lockFeeEnabled ? `同意后支付 ¥${d.fee} Lock fee` : '同意后直接确认席位'}</span>{d.mode === 'small' && <span>✓ {d.groupChatRule}</span>}</div></section><section className="publish-checks"><p>✓ 公开范围：{d.visibility}；精确集合点只在 Lock 后开放</p><p>✓ 退款规则：{d.refundPolicy || '将在发布前补充'}</p><p>✓ 重要修改将通知已申请 / 已确认用户，不能静默覆盖关键行程信息</p></section><div className="sheet-actions"><Button onClick={() => setCreateStep(5)}>返回修改</Button><Button kind="primary" onClick={() => setPublishConfirm(true)}>发布这场 Date</Button></div></section>}
       {planRevisionOpen && <Sheet close={() => setPlanRevisionOpen(false)}><section className="plan-revision-sheet form"><p className="eyebrow">PLAN REVISION</p><h2>你想调整哪一部分？</h2><p className="muted">AI 只会改动你指出的维度，其他已确认字段会被保留。</p><label>告诉我你的想法<textarea value={revisionNote} placeholder="例如：想把节奏再放慢一点，活动结束得早一些。" onChange={(event) => setRevisionNote(event.target.value)}/></label><div className="sheet-actions"><Button onClick={() => setPlanRevisionOpen(false)}>取消</Button><Button kind="primary" onClick={() => { if (!revisionNote.trim()) return say('先写下想调整的地方'); update({ description:`${d.description}（已按你的意见调整：${revisionNote.trim()}）` }); setRevisionNote(''); setPlanRevisionOpen(false); say('Date Plan 已按你的意见重新生成'); }}>重新生成方案</Button></div></section></Sheet>}
       {publishConfirm && <Sheet close={() => { setPublishConfirm(false); setCreateStep(6); }}><section className="publish-confirm-sheet"><p className="eyebrow">C5 · 最后确认</p><h2>发布这场 Date？</h2><section className="confirm-date-summary"><span>{d.mode === 'one' ? '◌' : '◌ ◌ ◌'}</span><div><b>{d.title}</b><small>{modeName[d.mode]} · {d.time} · {d.location}</small><small>{d.budgetScope} ¥{d.budget} · {d.lockFeeEnabled ? `Lock fee ¥${d.fee}` : '未设置 Lock fee'}</small></div></section><p>发布后将{d.visibility === '公开' ? '进入活动广场' : '仅对好友可见'}。你仍需手动确认每一份 Apply；精确集合点只在 Guest Lock 后开放。</p><div className="sheet-actions"><Button onClick={() => { setPublishConfirm(false); setCreateStep(6); }}>继续编辑</Button><Button kind="primary" onClick={publish}>确认发布</Button></div></section></Sheet>}
-      {createExitPrompt && <Sheet close={() => setCreateExitPrompt(false)}><section className="discard-sheet"><p className="eyebrow">CREATE DRAFT</p><h2>要离开这场 Date 吗？</h2><p className="muted">可以保留当前草稿，下次从这里继续；或者放弃本次内容。</p><div className="sheet-actions"><Button onClick={() => setCreateExitPrompt(false)}>继续编辑</Button><Button onClick={() => { setCreateExitPrompt(false); say('草稿已保留'); goBack(); }}>保留草稿并离开</Button><Button kind="danger" onClick={() => { setCreateExitPrompt(false); setCreateDraft(makeCreateDraft()); setCreateDirty(false); setCreateStep(1); goBack(); }}>放弃草稿</Button></div></section></Sheet>}
+      {createExitPrompt && <Sheet close={() => setCreateExitPrompt(false)}><section className="discard-sheet"><p className="eyebrow">CREATE DRAFT</p><h2>要离开这场 Date 吗？</h2><p className="muted">可以保留当前草稿，下次从这里继续；或者放弃本次内容。</p><div className="sheet-actions"><Button onClick={() => setCreateExitPrompt(false)}>继续编辑</Button><Button onClick={() => { setCreateExitPrompt(false); say('草稿已保留'); goBack(); }}>保留草稿并离开</Button><Button kind="danger" onClick={() => { createVoiceRequest.current += 1; clearTimeout(createVoiceTimer.current); setCreateVoice({ status:'idle' }); setCreateExitPrompt(false); setCreateDraft(makeCreateDraft()); setCreateDirty(false); setCreateStep(1); resetAiCreate(); goBack(); }}>放弃草稿</Button></div></section></Sheet>}
     </Layout>;
   }
   function PublishSuccess({ date }) { return <Layout title="发布完成" back bare><section className="publish-success"><div className="success-mark">✓</div><p className="eyebrow">DATE IS LIVE</p><h1>这场 Date 已发布</h1><p>它已{date.visibility === '公开' ? '进入活动广场' : '设为仅好友可见'}。接下来由你决定是否接受每一份 Apply。</p><section className="success-date-card"><span>{date.mode === 'one' ? '◌' : '◌ ◌ ◌'}</span><b>{date.title}</b><small>{date.time} · {date.location}</small><small>{modeName[date.mode]} · {date.lockFee ? `Lock fee ¥${date.lockFee}` : '未设置 Lock fee'}</small></section><div className="action-stack"><Button kind="primary" onClick={() => go('detail',{ dateId:date.id })}>查看 Host 管理</Button><Button onClick={() => { setMyTab('hosted'); go('my'); }}>回到我发起的活动</Button><Button onClick={() => go('discover')}>去活动广场看看</Button></div></section></Layout>; }
 
+  if (screen.name === 'splash') return <Splash/>;
   if (screen.name === 'dating-plan') return <DatingPlan/>;
   if (screen.name === 'voice-preference') return <VoicePreference/>;
   if (screen.name === 'discover') return <Discover/>;
