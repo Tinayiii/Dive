@@ -1,0 +1,639 @@
+<div id="my-activities-v2" aria-label="我的活动移动端低保真原型与跳转逻辑">
+  <style>
+    #my-activities-v2 { color: light-dark(#161616, #f4f4f4); font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; line-height: 1.35; }
+    #my-activities-v2 * { box-sizing: border-box; }
+    #my-activities-v2 button { font: inherit; }
+    #my-activities-v2 .ma-title { margin: 0 0 10px; font-size: 18px; font-weight: 800; }
+    #my-activities-v2 .ma-route { display: flex; align-items: center; gap: 6px; margin: 0 0 15px; overflow-x: auto; padding-bottom: 2px; color: light-dark(#555, #b8b8b8); font-size: 10px; white-space: nowrap; }
+    #my-activities-v2 .ma-route b { color: inherit; font-weight: 800; }
+    #my-activities-v2 .ma-route i { width: 24px; height: 1px; flex: 0 0 auto; background: light-dark(#6d6d6d, #a9a9a9); }
+    #my-activities-v2 .ma-boards { display: grid; grid-template-columns: repeat(24, 250px); gap: 17px; align-items: start; overflow-x: auto; padding: 2px 8px 16px 2px; }
+    #my-activities-v2 .ma-wrap { min-width: 250px; }
+    #my-activities-v2 .ma-label { display: block; margin: 0 0 7px 2px; color: light-dark(#555, #bebebe); font-size: 11px; font-weight: 800; }
+    #my-activities-v2 .ma-phone { position: relative; min-height: 570px; overflow: hidden; border: 2px solid light-dark(#181818, #e8e8e8); border-radius: 25px; background: light-dark(#fff, #1b1b1b); box-shadow: 4px 5px 0 light-dark(#d1d1d1, #414141); }
+    #my-activities-v2 .ma-phone.is-tall { min-height: 735px; }
+    #my-activities-v2 .ma-phone.is-modal { background: light-dark(#696969, #4a4a4a); }
+    #my-activities-v2 .ma-highlight { outline: 3px solid light-dark(#151515, #efefef); outline-offset: 4px; }
+    #my-activities-v2 .ma-statusbar { display: flex; justify-content: space-between; height: 22px; padding: 5px 17px 0; font-size: 8px; font-weight: 750; }
+    #my-activities-v2 .ma-titlebar { display: flex; align-items: center; justify-content: space-between; padding: 7px 13px 9px; }
+    #my-activities-v2 .ma-page-title { font-size: 17px; font-weight: 850; }
+    #my-activities-v2 .ma-back { font-size: 19px; font-weight: 800; line-height: 1; }
+    #my-activities-v2 .ma-iconbar { display: flex; align-items: center; gap: 8px; }
+    #my-activities-v2 .ma-icon { min-width: 18px; border: 0; background: transparent; color: inherit; padding: 1px; font-size: 14px; font-weight: 800; text-align: center; cursor: pointer; }
+    #my-activities-v2 .ma-icon small { display: block; margin-top: 1px; font-size: 6px; font-weight: 700; }
+    #my-activities-v2 .ma-tabs { display: grid; grid-template-columns: repeat(3, 1fr); border-top: 1px solid light-dark(#242424, #e1e1e1); border-bottom: 1px solid light-dark(#242424, #e1e1e1); }
+    #my-activities-v2 .ma-tab { border: 0; border-right: 1px solid light-dark(#c3c3c3, #5c5c5c); background: transparent; color: inherit; padding: 9px 1px 8px; font-size: 10px; cursor: pointer; }
+    #my-activities-v2 .ma-tab:last-child { border-right: 0; }
+    #my-activities-v2 .ma-tab.is-current { background: light-dark(#171717, #f0f0f0); color: light-dark(#fff, #171717); font-weight: 850; }
+    #my-activities-v2 .ma-body { padding: 10px 11px 18px; }
+    #my-activities-v2 .ma-list-head { display: flex; justify-content: space-between; margin-bottom: 8px; color: light-dark(#666, #bbb); font-size: 9px; }
+    #my-activities-v2 .ma-section-title { margin: 10px 0 6px 2px; color: light-dark(#484848, #cacaca); font-size: 9px; font-weight: 800; }
+    #my-activities-v2 .ma-card { display: block; width: 100%; margin: 0 0 8px; border: 1.3px solid light-dark(#242424, #dedede); background: light-dark(#fff, #252525); color: inherit; padding: 0; text-align: left; cursor: pointer; }
+    #my-activities-v2 .ma-card-top { display: grid; grid-template-columns: 45px 1fr; gap: 8px; padding: 8px; }
+    #my-activities-v2 .ma-cover { display: grid; height: 47px; place-items: center; border: 1px solid light-dark(#4e4e4e, #aaa); color: light-dark(#5f5f5f, #cacaca); font-size: 8px; text-align: center; }
+    #my-activities-v2 .ma-card-title { font-size: 11px; font-weight: 850; }
+    #my-activities-v2 .ma-card-meta { margin-top: 3px; color: light-dark(#606060, #bcbcbc); font-size: 8.5px; line-height: 1.45; }
+    #my-activities-v2 .ma-card-foot { display: flex; justify-content: space-between; align-items: center; min-height: 28px; border-top: 1px solid light-dark(#c7c7c7, #5a5a5a); padding: 5px 8px; font-size: 8.5px; }
+    #my-activities-v2 .ma-status { font-weight: 800; }
+    #my-activities-v2 .ma-avatars { display: flex; align-items: center; padding-right: 2px; }
+    #my-activities-v2 .ma-avatar { display: grid; width: 17px; height: 17px; place-items: center; margin-left: -4px; border: 1px solid light-dark(#111, #eee); border-radius: 50%; background: light-dark(#e7e7e7, #3c3c3c); font-size: 7px; font-weight: 800; }
+    #my-activities-v2 .ma-avatar:first-child { margin-left: 0; }
+    #my-activities-v2 .ma-avatar.more { background: light-dark(#161616, #eee); color: light-dark(#fff, #171717); }
+    #my-activities-v2 .ma-small-card { border: 1px solid light-dark(#767676, #9b9b9b); padding: 7px; font-size: 9px; }
+    #my-activities-v2 .ma-folder { display: flex; justify-content: space-between; width: 100%; margin-top: 8px; border: 1px solid light-dark(#353535, #cecece); background: light-dark(#eee, #2b2b2b); color: inherit; padding: 7px; font-size: 9px; font-weight: 800; cursor: pointer; }
+    #my-activities-v2 .ma-expired-list { display: none; border: 1px solid light-dark(#b7b7b7, #666); border-top: 0; padding: 6px 7px; color: light-dark(#626262, #bebebe); font-size: 8px; line-height: 1.7; }
+    #my-activities-v2 .ma-expired-list.is-open { display: block; }
+    #my-activities-v2 .ma-bottom { position: absolute; right: 0; bottom: 0; left: 0; display: grid; grid-template-columns: repeat(4, 1fr); border-top: 1.4px solid light-dark(#191919, #e9e9e9); background: light-dark(#fff, #1b1b1b); }
+    #my-activities-v2 .ma-bottom span { padding: 8px 0; color: light-dark(#777, #b7b7b7); font-size: 7.5px; text-align: center; }
+    #my-activities-v2 .ma-bottom .is-current { color: inherit; font-weight: 850; }
+    #my-activities-v2 .ma-hero { display: grid; height: 96px; margin: 0 12px; place-items: center; border: 1.4px solid light-dark(#222, #dedede); background: repeating-linear-gradient(-45deg, transparent 0, transparent 6px, light-dark(#eeeeee, #2c2c2c) 7px, light-dark(#eeeeee, #2c2c2c) 8px); font-size: 10px; font-weight: 800; }
+    #my-activities-v2 .ma-tags { display: flex; flex-wrap: wrap; gap: 4px; padding: 8px 13px 3px; }
+    #my-activities-v2 .ma-tag { border: 1px solid light-dark(#575757, #a8a8a8); padding: 2px 5px; font-size: 8px; }
+    #my-activities-v2 .ma-detail-title { padding: 4px 13px 1px; font-size: 15px; font-weight: 850; }
+    #my-activities-v2 .ma-detail-state { padding: 0 13px 5px; font-size: 9px; font-weight: 800; }
+    #my-activities-v2 .ma-details { margin: 0 12px; border-top: 1px solid light-dark(#3a3a3a, #c9c9c9); }
+    #my-activities-v2 .ma-row { display: grid; grid-template-columns: 48px 1fr; gap: 6px; border-bottom: 1px solid light-dark(#d3d3d3, #565656); padding: 5px 1px; font-size: 8.5px; line-height: 1.35; }
+    #my-activities-v2 .ma-row .ma-key { color: light-dark(#686868, #bdbdbd); }
+    #my-activities-v2 .ma-owner-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 9px 12px 34px; }
+    #my-activities-v2 .ma-action { border: 1.3px solid light-dark(#191919, #ececec); background: transparent; color: inherit; padding: 7px 3px; font-size: 8.5px; font-weight: 800; cursor: pointer; }
+    #my-activities-v2 .ma-action.is-solid { background: light-dark(#171717, #eee); color: light-dark(#fff, #171717); }
+    #my-activities-v2 .ma-menu { position: absolute; top: 55px; right: 11px; z-index: 2; width: 80px; border: 1.4px solid light-dark(#161616, #eee); background: light-dark(#fff, #202020); box-shadow: 2px 3px 0 light-dark(#bfbfbf, #535353); }
+    #my-activities-v2 .ma-menu button { display: block; width: 100%; border: 0; border-bottom: 1px solid light-dark(#cacaca, #555); background: transparent; color: inherit; padding: 8px; font-size: 9px; text-align: left; cursor: pointer; }
+    #my-activities-v2 .ma-menu button:last-child { border-bottom: 0; }
+    #my-activities-v2 .ma-menu .ma-delete { color: light-dark(#812020, #ffadad); }
+    #my-activities-v2 .ma-summary { display: flex; justify-content: space-between; margin: 0 12px 9px; border: 1.2px solid light-dark(#242424, #dedede); padding: 7px; font-size: 9px; }
+    #my-activities-v2 .ma-applicant { margin: 0 12px 8px; border: 1.2px solid light-dark(#242424, #dedede); padding: 7px; }
+    #my-activities-v2 .ma-applicant-head { display: flex; align-items: center; justify-content: space-between; font-size: 9px; }
+    #my-activities-v2 .ma-profile { margin: 5px 0 6px; color: light-dark(#5f5f5f, #bcbcbc); font-size: 8px; line-height: 1.4; }
+    #my-activities-v2 .ma-app-actions { display: grid; grid-template-columns: 50px 1fr 1fr; gap: 4px; }
+    #my-activities-v2 .ma-mini { border: 1px solid light-dark(#393939, #cfcfcf); background: transparent; color: inherit; padding: 5px 1px; font-size: 8px; font-weight: 800; cursor: pointer; }
+    #my-activities-v2 .ma-mini.is-ok { background: light-dark(#171717, #eee); color: light-dark(#fff, #171717); }
+    #my-activities-v2 .ma-mini.is-reject { color: light-dark(#852121, #ffaaaa); }
+    #my-activities-v2 .ma-modal-sheet { position: absolute; right: 7px; bottom: 7px; left: 7px; border: 1.5px solid light-dark(#171717, #eee); background: light-dark(#fff, #1e1e1e); box-shadow: 0 -1px 0 light-dark(#ededed, #343434); padding: 11px; }
+    #my-activities-v2 .ma-modal-title { margin-bottom: 5px; font-size: 13px; font-weight: 850; }
+    #my-activities-v2 .ma-modal-copy { margin-bottom: 8px; color: light-dark(#555, #c2c2c2); font-size: 8.5px; line-height: 1.45; }
+    #my-activities-v2 .ma-reasons { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 7px; }
+    #my-activities-v2 .ma-reason { border: 1px solid light-dark(#575757, #aaa); padding: 4px 5px; font-size: 8px; }
+    #my-activities-v2 .ma-input { min-height: 33px; margin: 0 0 7px; border: 1px solid light-dark(#3f3f3f, #cfcfcf); padding: 6px; color: light-dark(#777, #a8a8a8); font-size: 8px; }
+    #my-activities-v2 .ma-caption { margin: 0 0 8px; border-left: 3px solid light-dark(#1c1c1c, #eeeeee); background: light-dark(#f0f0f0, #2b2b2b); padding: 6px 7px; font-size: 8.5px; line-height: 1.4; }
+    #my-activities-v2 .ma-form { padding: 0 12px; }
+    #my-activities-v2 .ma-field-label { display: block; margin: 0 0 4px; font-size: 9px; font-weight: 850; }
+    #my-activities-v2 .ma-field { min-height: 27px; margin: 0 0 7px; border: 1.1px solid light-dark(#303030, #d8d8d8); padding: 6px; color: light-dark(#555, #c5c5c5); font-size: 8.5px; }
+    #my-activities-v2 .ma-field.is-text { min-height: 47px; }
+    #my-activities-v2 .ma-group { border: 1.2px solid light-dark(#343434, #d6d6d6); padding: 7px; font-size: 8.5px; }
+    #my-activities-v2 .ma-group strong { display: block; margin-bottom: 3px; font-size: 9px; }
+    #my-activities-v2 .ma-rule { margin: 8px 12px 9px; border: 1.2px dashed light-dark(#333, #d5d5d5); padding: 7px; font-size: 8px; line-height: 1.45; }
+    #my-activities-v2 .ma-rule b { font-size: 8.5px; }
+    #my-activities-v2 .ma-notice { margin: 0 12px; border: 1.3px solid light-dark(#232323, #e0e0e0); background: light-dark(#f6f6f6, #292929); padding: 8px; }
+    #my-activities-v2 .ma-notice-title { display: flex; justify-content: space-between; gap: 6px; margin-bottom: 5px; font-size: 10px; font-weight: 850; }
+    #my-activities-v2 .ma-notice-copy { margin-bottom: 6px; color: light-dark(#565656, #c7c7c7); font-size: 8px; line-height: 1.4; }
+    #my-activities-v2 .ma-check { display: flex; gap: 5px; padding: 4px 0; border-top: 1px solid light-dark(#cecece, #5d5d5d); font-size: 8px; line-height: 1.35; }
+    #my-activities-v2 .ma-checkmark { display: grid; width: 11px; height: 11px; flex: 0 0 auto; place-items: center; border: 1px solid currentColor; background: light-dark(#171717, #eee); color: light-dark(#fff, #171717); font-size: 8px; }
+    #my-activities-v2 .ma-checkmark.is-empty { background: transparent; color: transparent; }
+    #my-activities-v2 .ma-publish { position: absolute; right: 12px; bottom: 34px; left: 12px; border: 1.4px solid light-dark(#171717, #eee); background: light-dark(#171717, #eee); color: light-dark(#fff, #171717); padding: 9px; font-size: 10px; font-weight: 850; text-align: center; cursor: pointer; }
+    #my-activities-v2 .ma-feedback-event { margin: 0 12px 8px; border: 1.2px solid light-dark(#2c2c2c, #dedede); padding: 7px; font-size: 9px; }
+    #my-activities-v2 .ma-feedback-event strong { display: block; margin-bottom: 2px; font-size: 10px; }
+    #my-activities-v2 .ma-rating-card { margin: 0 12px 9px; border: 1.4px solid light-dark(#222, #e0e0e0); background: light-dark(#fff, #252525); padding: 8px; }
+    #my-activities-v2 .ma-rating-title { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; font-size: 10px; font-weight: 850; }
+    #my-activities-v2 .ma-rating-title span { color: light-dark(#626262, #bebebe); font-size: 8px; font-weight: 600; }
+    #my-activities-v2 .ma-score-row { display: flex; align-items: center; justify-content: space-between; padding: 5px 0; border-top: 1px solid light-dark(#d0d0d0, #595959); font-size: 8.5px; }
+    #my-activities-v2 .ma-score-row:first-of-type { border-top: 0; }
+    #my-activities-v2 .ma-stars { display: flex; gap: 1px; border: 0; background: transparent; color: inherit; padding: 0; font-size: 12px; letter-spacing: -1px; cursor: pointer; }
+    #my-activities-v2 .ma-score-on { color: light-dark(#171717, #f1f1f1); }
+    #my-activities-v2 .ma-score-off { color: light-dark(#ababab, #7e7e7e); }
+    #my-activities-v2 .ma-private-note { margin-top: 6px; border-top: 1px solid light-dark(#d0d0d0, #595959); padding-top: 6px; color: light-dark(#575757, #c6c6c6); font-size: 8px; line-height: 1.4; }
+    #my-activities-v2 .ma-memory-card { margin: 0 12px; border: 1.4px solid light-dark(#222, #e0e0e0); background: light-dark(#f8f8f8, #272727); padding: 8px; }
+    #my-activities-v2 .ma-photo-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; margin: 7px 0; }
+    #my-activities-v2 .ma-photo { display: grid; aspect-ratio: 1; place-items: center; border: 1px dashed light-dark(#4b4b4b, #bcbcbc); color: light-dark(#666, #c2c2c2); font-size: 8px; text-align: center; }
+    #my-activities-v2 .ma-photo.is-filled { border-style: solid; background: repeating-linear-gradient(45deg, transparent 0, transparent 4px, light-dark(#e8e8e8, #393939) 5px, light-dark(#e8e8e8, #393939) 6px); color: inherit; font-weight: 800; }
+    #my-activities-v2 .ma-privacy { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin: 6px 0 0; border-top: 1px solid light-dark(#d0d0d0, #595959); padding-top: 6px; font-size: 8px; }
+    #my-activities-v2 .ma-privacy-toggle { border: 1px solid light-dark(#2a2a2a, #dedede); background: light-dark(#171717, #eee); color: light-dark(#fff, #171717); padding: 4px 5px; font-size: 8px; font-weight: 800; cursor: pointer; }
+    #my-activities-v2 .ma-profile-head { padding: 5px 13px 9px; border-bottom: 1px solid light-dark(#282828, #dcdcdc); }
+    #my-activities-v2 .ma-profile-name { font-size: 15px; font-weight: 850; }
+    #my-activities-v2 .ma-profile-copy { margin-top: 3px; color: light-dark(#626262, #bcbcbc); font-size: 8px; }
+    #my-activities-v2 .ma-profile-section { padding: 10px 12px 0; font-size: 10px; font-weight: 850; }
+    #my-activities-v2 .ma-profile-photo { margin: 7px 12px; border: 1.3px solid light-dark(#242424, #dedede); background: light-dark(#fff, #252525); cursor: pointer; }
+    #my-activities-v2 .ma-profile-photo-main { display: grid; height: 125px; place-items: center; background: repeating-linear-gradient(-45deg, transparent 0, transparent 7px, light-dark(#eeeeee, #343434) 8px, light-dark(#eeeeee, #343434) 9px); font-size: 10px; font-weight: 850; }
+    #my-activities-v2 .ma-photo-caption { padding: 7px; border-top: 1px solid light-dark(#c7c7c7, #565656); font-size: 8.5px; line-height: 1.45; }
+    #my-activities-v2 .ma-photo-caption span { display: block; color: light-dark(#666, #bebebe); font-size: 8px; }
+    #my-activities-v2 .ma-option-stack { display: grid; gap: 6px; margin: 0 12px; }
+    #my-activities-v2 .ma-option { display: grid; grid-template-columns: 1fr auto; align-items: center; width: 100%; border: 1.3px solid light-dark(#252525, #dedede); background: light-dark(#fff, #252525); color: inherit; padding: 8px; text-align: left; cursor: pointer; }
+    #my-activities-v2 .ma-option strong { display: block; font-size: 9px; }
+    #my-activities-v2 .ma-option span { display: block; margin-top: 2px; color: light-dark(#656565, #bfbfbf); font-size: 8px; }
+    #my-activities-v2 .ma-option b { font-size: 14px; }
+    #my-activities-v2 .ma-person-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: 0 12px; }
+    #my-activities-v2 .ma-person { border: 1.2px solid light-dark(#4b4b4b, #bcbcbc); background: transparent; color: inherit; padding: 7px 2px; font-size: 8px; cursor: pointer; text-align: center; }
+    #my-activities-v2 .ma-person.is-selected { background: light-dark(#191919, #eeeeee); color: light-dark(#fff, #171717); border-color: light-dark(#191919, #eeeeee); }
+    #my-activities-v2 .ma-person .ma-avatar { margin: 0 auto 4px; }
+    #my-activities-v2 .ma-private-pill { border: 1px solid light-dark(#575757, #aaa); padding: 2px 5px; color: light-dark(#5b5b5b, #c4c4c4); font-size: 8px; }
+    #my-activities-v2 .ma-arrow-note { margin: 6px 0 0 2px; color: light-dark(#5a5a5a, #bbb); font-size: 8px; }
+    #my-activities-v2 .ma-flow-kicker { margin: 0 0 9px; color: light-dark(#555, #c5c5c5); font-size: 9px; line-height: 1.45; }
+    #my-activities-v2 .ma-stepper { display: flex; align-items: center; gap: 4px; margin: 4px 12px 11px; }
+    #my-activities-v2 .ma-step-dot { display: grid; width: 17px; height: 17px; place-items: center; border: 1px solid light-dark(#202020, #e5e5e5); border-radius: 50%; background: light-dark(#fff, #242424); font-size: 8px; font-weight: 800; }
+    #my-activities-v2 .ma-step-dot.is-current { background: light-dark(#171717, #eeeeee); color: light-dark(#fff, #171717); }
+    #my-activities-v2 .ma-step-line { width: 31px; height: 1px; background: light-dark(#5f5f5f, #adadad); }
+    #my-activities-v2 .ma-circle-actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; margin: 9px 12px 34px; }
+    #my-activities-v2 .ma-choice-circle { display: grid; aspect-ratio: 1; place-items: center; border: 1.4px solid light-dark(#202020, #e8e8e8); border-radius: 50%; background: light-dark(#fff, #252525); color: inherit; padding: 5px; text-align: center; font-size: 8px; font-weight: 850; cursor: pointer; }
+    #my-activities-v2 .ma-choice-circle.is-solid { background: light-dark(#171717, #eeeeee); color: light-dark(#fff, #171717); }
+    #my-activities-v2 .ma-choice-circle small { display: block; margin-top: 2px; font-size: 7px; font-weight: 650; }
+    #my-activities-v2 .ma-mini-filter { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 12px 9px; }
+    #my-activities-v2 .ma-mini-filter span { border: 1px solid light-dark(#555, #aaa); padding: 3px 5px; font-size: 8px; }
+    #my-activities-v2 .ma-profile-card { margin: 0 12px 8px; border: 1.2px solid light-dark(#242424, #dedede); padding: 8px; font-size: 8.5px; line-height: 1.4; }
+    #my-activities-v2 .ma-chat { margin: 0 12px; font-size: 8.5px; }
+    #my-activities-v2 .ma-chat-context { margin-bottom: 7px; border: 1px solid light-dark(#333, #d9d9d9); padding: 6px; line-height: 1.4; }
+    #my-activities-v2 .ma-bubble { width: fit-content; max-width: 88%; margin: 5px 0; border: 1px solid light-dark(#555, #aaa); padding: 6px; line-height: 1.4; }
+    #my-activities-v2 .ma-bubble.is-me { margin-left: auto; background: light-dark(#eeeeee, #363636); }
+    #my-activities-v2 .ma-bottom-action { position: absolute; right: 12px; bottom: 34px; left: 12px; }
+    @media (max-width: 620px) { #my-activities-v2 .ma-boards { grid-template-columns: repeat(24, 250px); } }
+  </style>
+
+  <h2 class="ma-title">Dive · 完整产品闭环（低保真原型与跳转关系）</h2>
+  <p class="ma-flow-kicker">统一命名：<b>活动 = Date</b>；<b>1v1 Date</b> 中 Host 是约会对象，<b>Small Date</b> 中 Host 是组织者。所有「详情」共用一份数据，按 Host / Guest 身份呈现不同操作。</p>
+  <div class="ma-route" aria-label="端到端跳转关系"><b>00 建档</b><i></i><b>A1 广场</b><i></i><span>No / Save / Yes</span><i></i><b>A2 详情</b><i></i><span>询问 / Apply</span><i></i><b>Host 回复</b><i></i><span>支付 Lock fee</span><i></i><b>A3 邀请函</b><i></i><b>01 我的活动</b><i></i><span>IM / 活动进行</span><i></i><b>05a 三问评价</b><i></i><span>Host 反馈 / 双向续联 / 记忆</span><i></i><b>Profile</b></div>
+
+  <div class="ma-boards">
+    <section class="ma-wrap" aria-label="00 Profile 创建">
+      <span class="ma-label">00 · 首次进入：Dating Profile</span>
+      <div class="ma-phone" id="ma-onboarding">
+        <div class="ma-statusbar"><span>9:41</span><span>●●●</span></div>
+        <div class="ma-titlebar"><span class="ma-page-title">创建你的 Dating Profile</span><span>1/3</span></div>
+        <div class="ma-stepper"><span class="ma-step-dot is-current">1</span><i class="ma-step-line"></i><span class="ma-step-dot">2</span><i class="ma-step-line"></i><span class="ma-step-dot">3</span></div>
+        <div class="ma-profile-card"><strong>1 · 关于我</strong><br>头像、昵称、生日、身高、教育、工作、家乡、现居地、收入；照片 / 声音选填。</div>
+        <div class="ma-profile-card"><strong>2 · Dating Personality</strong><br>最多 5 个标签、MBTI（选填）、当前期待、恋爱性格。</div>
+        <div class="ma-profile-card"><strong>3 · 约会偏好</strong><br>至少 3 个活动类型、人数偏好、可参加时间；用于初始推荐和筛选。</div>
+        <div class="ma-caption">退出自动保存；资料完成前可浏览但不能申请或发布 Date。</div>
+        <button class="ma-publish" type="button" data-route-target="ma-plaza">完成，开始探索</button>
+      </div>
+      <div class="ma-arrow-note">登录 → 建档完成 → 默认进入活动广场</div>
+    </section>
+
+    <section class="ma-wrap" aria-label="活动广场">
+      <span class="ma-label">A1 · 活动广场：浏览 Date</span>
+      <div class="ma-phone" id="ma-plaza">
+        <div class="ma-statusbar"><span>9:41</span><span>●●●</span></div>
+        <div class="ma-titlebar"><span class="ma-page-title">活动广场</span><button class="ma-icon" type="button">⌘<small>筛选</small></button></div>
+        <div class="ma-mini-filter"><span>上海</span><span>本周末</span><span>3 km</span><span>1v1</span><span>¥80</span><span>想安静认识一个人</span></div>
+        <button class="ma-card" type="button" data-route-target="ma-guest-detail"><div class="ma-hero">Host 封面 / Date 氛围图</div><div class="ma-card-top"><div class="ma-cover">Host<br>林</div><div><div class="ma-card-title">周六傍晚，一起逛独立书店</div><div class="ma-card-meta">周六 16:00 · 静安寺附近<br>1v1 Date · 还剩 1 位 · 人均 ¥80<br>Lock fee ¥30</div></div></div><div class="ma-card-foot"><span>林 · 慢热但很会聊天<br>已确认：<i class="ma-avatar">林</i></span><span>整卡看详情 ›</span></div></button>
+        <div class="ma-circle-actions"><button class="ma-choice-circle" type="button">No<small>跳过</small></button><button class="ma-choice-circle" type="button" data-route-target="ma-favorites">Save<small>收藏后下一张</small></button><button class="ma-choice-circle is-solid" type="button" data-route-target="ma-guest-detail">Yes<small>查看 / 申请</small></button></div>
+        <div class="ma-bottom"><span class="is-current">活动</span><span>IM</span><span data-route-target="ma-joined">我的活动</span><span data-route-target="ma-profile">Profile</span></div>
+      </div>
+      <div class="ma-arrow-note">三个圆形决策控件统一：No = 仅本次跳过；Save = 收藏后继续浏览；Yes = 进入详情。</div>
+    </section>
+
+    <section class="ma-wrap" aria-label="Guest 活动详情与锁席">
+      <span class="ma-label">A2 · Guest 详情：询问 / Apply</span>
+      <div class="ma-phone is-tall" id="ma-guest-detail">
+        <div class="ma-statusbar"><span>9:41</span><span>●●●</span></div>
+        <div class="ma-titlebar"><span class="ma-back">‹</span><span class="ma-page-title">Date 详情</span><span class="ma-iconbar"><button class="ma-icon" type="button">↗<small>分享</small></button><button class="ma-icon" type="button" data-route-target="ma-favorites">♡<small>收藏</small></button></span></div>
+        <div class="ma-hero">封面图 · 温柔 / 安静 / 有话聊</div><div class="ma-detail-title">周六傍晚，一起逛独立书店</div><div class="ma-detail-state">1v1 Date · Host：林</div>
+        <div class="ma-details"><div class="ma-row"><span class="ma-key">时间</span><span>本周六 16:00</span></div><div class="ma-row"><span class="ma-key">地点</span><span>静安寺附近（支付 Lock fee 后给精确点位）</span></div><div class="ma-row"><span class="ma-key">内容</span><span>选书、喝咖啡、交换最近在读的书</span></div><div class="ma-row"><span class="ma-key">预算 / Lock fee</span><span>人均 ¥80 · AA · Lock fee ¥30</span></div><div class="ma-row"><span class="ma-key">已确认</span><span><i class="ma-avatar">林</i> 林（Host）</span></div><div class="ma-row"><span class="ma-key">期待 / 规则</span><span>喜欢慢慢聊天 · 报名前可咨询 Host</span></div><div class="ma-row"><span class="ma-key">Host</span><span>林，ENFP · 认真认识一个人　›</span></div></div>
+        <div class="ma-caption">Apply 不占位、不收费。Host 回复 / 同意后才进入「待支付 Lock fee」；支付成功后生成邀请函，并自动加入我参与的活动。</div>
+        <div class="ma-owner-actions"><button class="ma-action" type="button" data-route-target="ma-im-list">问问 Host</button><button class="ma-action is-solid" type="button" data-route-target="ma-payment">Apply → Host 回复后支付</button></div>
+      </div>
+      <div class="ma-arrow-note">Small Date 同理，但显示所有已确认参与者头像；支付只发生在申请被同意后。</div>
+    </section>
+
+    <section class="ma-wrap" aria-label="Lock fee 支付">
+      <span class="ma-label">A3 · Host 同意后：支付 Lock fee</span>
+      <div class="ma-phone" id="ma-payment">
+        <div class="ma-statusbar"><span>9:41</span><span>●●●</span></div>
+        <div class="ma-titlebar"><span class="ma-back">‹</span><span class="ma-page-title">确认 Lock fee</span><span>待支付</span></div>
+        <div class="ma-feedback-event"><strong>Host 林已同意你的申请</strong><span>支付后锁定席位；未支付不占名额</span></div>
+        <div class="ma-profile-card"><strong>周六傍晚，一起逛独立书店</strong><br>本周六 16:00 · 静安寺附近<br>人均预算 ¥80（AA）</div>
+        <div class="ma-profile-card"><strong>Lock fee ¥30</strong><br>Host 定义的锁席费用 · 支付成功后开放精确集合点并生成邀请函。</div>
+        <button class="ma-publish" type="button" data-route-target="ma-invitation">支付 Lock fee ¥30</button>
+      </div>
+      <div class="ma-arrow-note">支付超时自动释放名额，并通知 Host 与 Guest。</div>
+    </section>
+
+    <section class="ma-wrap" aria-label="邀请函与我参与的">
+      <span class="ma-label">A4 · 邀请函 → 自动加入我参与的</span>
+      <div class="ma-phone" id="ma-invitation">
+        <div class="ma-statusbar"><span>9:41</span><span>●●●</span></div>
+        <div class="ma-titlebar"><span class="ma-back">‹</span><span class="ma-page-title">你的邀请函</span><span>✓</span></div>
+        <div class="ma-hero">邀请函 · 已锁席</div>
+        <div class="ma-profile-card"><strong>周六傍晚，一起逛独立书店</strong><br>1v1 Date · Host 林<br>本周六 16:00 · 静安寺附近</div>
+        <div class="ma-profile-card"><strong>Lock fee ¥30 · 已支付</strong><br>已确认 2 / 2 人<br>精确集合点：支付成功后开放</div>
+        <div class="ma-profile-card"><strong>下一步</strong><br>已自动加入「我参与的」；可打开与 Host 的活动 IM。</div>
+        <div class="ma-owner-actions"><button class="ma-action" type="button" data-route-target="ma-im">打开活动 IM</button><button class="ma-action is-solid" type="button" data-route-target="ma-joined">查看我参与的</button></div>
+      </div>
+      <div class="ma-arrow-note">此页只在 Lock fee 支付成功后出现；未支付或超时不会占用名额。</div>
+    </section>
+
+    <section class="ma-wrap" aria-label="Host 创建 Date">
+      <span class="ma-label">H1 · Host：创建与发布 Date</span>
+      <div class="ma-phone" id="ma-create">
+        <div class="ma-statusbar"><span>9:41</span><span>●●●</span></div>
+        <div class="ma-titlebar"><span class="ma-back">‹</span><span class="ma-page-title">创建 Date</span><span>草稿已保存</span></div>
+        <div class="ma-stepper"><span class="ma-step-dot is-current">1</span><i class="ma-step-line"></i><span class="ma-step-dot">2</span><i class="ma-step-line"></i><span class="ma-step-dot">3</span></div>
+        <div class="ma-profile-card"><strong>1 · 选择模式</strong><br><b>1v1 Date</b>（固定 2 人） / <b>Small Date</b>（建议 3–10 人）</div>
+        <div class="ma-profile-card"><strong>2 · 填写活动计划</strong><br>时间、活动事件、活动预算；文字 / 语音输入可由 AI 补全标题、vibe、内容、文案与封面建议，Host 可改。</div>
+        <div class="ma-profile-card"><strong>3 · 规则与发布确认</strong><br>人数、报名规则、Host 定义的 Lock fee、地点（可模糊）、期待、截止时间、公开范围。</div>
+        <div class="ma-caption">AI 不自动发布。发布后进入「我发起的」；公开 Date 才进入活动广场。</div>
+        <button class="ma-publish" type="button" data-route-target="ma-hosted">预览并发布</button>
+      </div>
+      <div class="ma-arrow-note">创建入口固定在「我的活动 · 我发起的」右上角，避免和浏览广场的 Guest 流混淆。</div>
+    </section>
+
+    <section class="ma-wrap" aria-label="IM 列表与活动上下文选择">
+      <span class="ma-label">C0 · IM：人 / 群与上下文选择</span>
+      <div class="ma-phone" id="ma-im-list">
+        <div class="ma-statusbar"><span>9:41</span><span>●●●</span></div>
+        <div class="ma-titlebar"><span class="ma-page-title">IM</span><button class="ma-icon" type="button">⌕<small>搜索</small></button></div>
+        <div class="ma-tabs"><button class="ma-tab is-current" type="button">人</button><button class="ma-tab" type="button">群聊</button><button class="ma-tab" type="button">活动优先</button></div>
+        <div class="ma-body"><div class="ma-list-head"><span>搜索人、群或活动</span><span>⌕</span></div><button class="ma-card" type="button" data-route-target="ma-im"><div class="ma-card-top"><div class="ma-cover">林</div><div><div class="ma-card-title">林</div><div class="ma-card-meta">你们关联 2 场 Date<br>选择聊天前，先选活动上下文</div></div></div><div class="ma-card-foot"><span>选择上下文</span><span>›</span></div></button><div class="ma-section-title">群聊</div><button class="ma-small-card" type="button" style="width:100%; background:transparent; color:inherit; text-align:left; cursor:pointer">周三桌游夜 · 6 人　›</button><div class="ma-caption">上下文列表：① 周六独立书店（Host）　② 上月看展（Guest）</div></div>
+      </div>
+      <div class="ma-arrow-note">选择聊天对象后，若有多场关联 Date，先选活动上下文，再进入聊天。</div>
+    </section>
+
+    <section class="ma-wrap" aria-label="活动 IM 与公开 Profile">
+      <span class="ma-label">C1 · IM：活动卡与状态常驻</span>
+      <div class="ma-phone" id="ma-im">
+        <div class="ma-statusbar"><span>9:41</span><span>●●●</span></div>
+        <div class="ma-titlebar"><span class="ma-back">‹</span><span class="ma-page-title">林</span><button class="ma-icon" type="button" data-route-target="ma-profile">◉<small>Profile</small></button></div>
+        <div class="ma-chat"><div class="ma-chat-context"><b>共同 Date · 周六傍晚，一起逛独立书店</b><br>状态：待支付 Lock fee · 本周六 16:00<br>林是本次 Host　→ 查看详情 / 切换上下文</div><div class="ma-bubble">你好！我想问下书店会逛多久？</div><div class="ma-bubble is-me">大约两小时，之后可以一起喝杯咖啡。</div><div class="ma-chat-context">可发送图片与近期 Date 卡；活动卡点击始终回到标准详情，并沿用权限。</div></div>
+        <button class="ma-publish" type="button">＋　输入消息 / 图片 / 活动</button>
+      </div>
+      <div class="ma-arrow-note">申请期可与 Host 沟通；锁席后保留 1v1 IM，Small Date 同时创建活动群聊。</div>
+    </section>
+
+    <section class="ma-wrap" aria-label="公开 Profile">
+      <span class="ma-label">P1 · Profile：公开资料与活动记忆</span>
+      <div class="ma-phone" id="ma-profile">
+        <div class="ma-statusbar"><span>9:41</span><span>●●●</span></div>
+        <div class="ma-titlebar"><span class="ma-back">‹</span><span class="ma-page-title">林的 Profile</span><span></span></div>
+        <div class="ma-profile-head"><div class="ma-profile-name">林 · 26</div><div class="ma-profile-copy">ENFP · 上海 · 想认真认识一个人</div></div>
+        <div class="ma-profile-card"><strong>关于我</strong><br>慢热但很会聊天。喜欢独立书店、散步和把一场见面过得不着急。</div>
+        <div class="ma-profile-card"><strong>约会偏好</strong><br>书店 / 展览 / 咖啡 · 1v1 Date 为主 · 周末下午</div>
+        <div class="ma-profile-card"><strong>活动照片</strong><br>仅用户明确公开的活动记忆会带「活动照片」标签，并链接回对应 Date。</div>
+        <div class="ma-caption">不展示私人活动历史、单方续联结果、Host 评分、拒绝理由与关闭公开的信息。</div>
+      </div>
+      <div class="ma-arrow-note">活动详情、IM 头像都可进入公开 Profile；本人可在 Profile 中编辑资料、隐私与通知。</div>
+    </section>
+
+    <section class="ma-wrap" aria-label="我的 Profile 管理">
+      <span class="ma-label">P2 · 我的 Profile：历史与设置</span>
+      <div class="ma-phone" id="ma-profile-home">
+        <div class="ma-statusbar"><span>9:41</span><span>●●●</span></div>
+        <div class="ma-titlebar"><span class="ma-page-title">我的 Profile</span><button class="ma-icon" type="button">✎<small>编辑</small></button></div>
+        <div class="ma-profile-head"><div class="ma-profile-name">Vivi · 26</div><div class="ma-profile-copy">上海 · 认真认识一个人 · 公开资料预览 ›</div></div>
+        <div class="ma-profile-card"><strong>活动统计</strong><br>参与 12　·　发起 3　·　已结束 9</div>
+        <button class="ma-option" type="button" data-route-target="ma-detail"><span><strong>个人历史</strong><span>已完成与近期 Date；点击进入标准详情</span></span><b>›</b></button>
+        <div class="ma-option-stack" style="margin-top:8px"><button class="ma-option" type="button"><span><strong>预览我的公开 Profile</strong><span>交友软件式资料；没有公开动态流</span></span><b>›</b></button><button class="ma-option" type="button"><span><strong>隐私与通知</strong><span>管理公开字段与提醒</span></span><b>›</b></button></div>
+      </div>
+      <div class="ma-arrow-note">本人的 Profile 承载编辑、公开预览、历史、统计、隐私与通知设置。</div>
+    </section>
+
+    <section class="ma-wrap" aria-label="01a 我参与的">
+      <span class="ma-label">01a · 我参与的（整卡进入详情）</span>
+      <div class="ma-phone" id="ma-joined">
+        <div class="ma-statusbar"><span>9:41</span><span>●●●</span></div>
+        <div class="ma-titlebar"><span class="ma-page-title">我的活动</span><span></span></div>
+        <div class="ma-tabs"><button class="ma-tab is-current" type="button">我参与的</button><button class="ma-tab" type="button">我收藏的</button><button class="ma-tab" type="button">我发起的</button></div>
+        <div class="ma-body">
+          <div class="ma-list-head"><span>即将参加 1 场</span><span>点击整卡 → 详情</span></div>
+          <button class="ma-card" type="button" data-route-target="ma-detail" aria-label="打开周日城市骑行活动详情">
+            <div class="ma-card-top"><div class="ma-cover">骑行</div><div><div class="ma-card-title">周日城市骑行</div><div class="ma-card-meta">明天 09:30 · 东四环骑行道<br>多人 · 6 人上限</div></div></div>
+            <div class="ma-card-foot"><span class="ma-status">已同意</span><span class="ma-avatars" aria-label="全部已同意成员：林、安、凯、木"><i class="ma-avatar">林</i><i class="ma-avatar">安</i><i class="ma-avatar">凯</i><i class="ma-avatar">木</i></span></div>
+          </button>
+          <div class="ma-section-title">待确认</div>
+          <button class="ma-card" type="button" data-route-target="ma-detail" aria-label="打开下周桌游夜活动详情">
+            <div class="ma-card-top"><div class="ma-cover">桌游</div><div><div class="ma-card-title">下周桌游夜</div><div class="ma-card-meta">下周三 19:30 · 静安寺</div></div></div>
+            <div class="ma-card-foot"><span class="ma-status">等待发起人同意</span></div>
+          </button>
+          <div class="ma-section-title">已结束</div>
+          <button class="ma-small-card" type="button" data-route-target="ma-quick-eval" style="width:100%; background:transparent; color:inherit; text-align:left; cursor:pointer">周三桌游夜 · 完成 / 跳过活动结束评价 →</button>
+        </div>
+        <div class="ma-bottom"><span>发现</span><span>消息</span><span class="is-current">我的活动</span><span>我的</span></div>
+      </div>
+    </section>
+
+    <section class="ma-wrap" aria-label="01b 我收藏的">
+      <span class="ma-label">01b · 我收藏的（含状态机）</span>
+      <div class="ma-phone" id="ma-favorites">
+        <div class="ma-statusbar"><span>9:41</span><span>●●●</span></div>
+        <div class="ma-titlebar"><span class="ma-page-title">我的活动</span><span></span></div>
+        <div class="ma-tabs"><button class="ma-tab" type="button">我参与的</button><button class="ma-tab is-current" type="button">我收藏的</button><button class="ma-tab" type="button">我发起的</button></div>
+        <div class="ma-body">
+          <div class="ma-section-title">未开始</div>
+          <button class="ma-card" type="button" data-route-target="ma-detail"><div class="ma-card-top"><div class="ma-cover">电影</div><div><div class="ma-card-title">夏末露天电影</div><div class="ma-card-meta">8 月 30 日 · 西岸<br>招募中</div></div></div></button>
+          <div class="ma-section-title">正在进行</div>
+          <button class="ma-card" type="button" data-route-target="ma-detail"><div class="ma-card-top"><div class="ma-cover">咖啡</div><div><div class="ma-card-title">下雨天 Coffee Walk</div><div class="ma-card-meta">今日 14:00 至 17:00<br>进行中</div></div></div></button>
+          <div class="ma-section-title">已结束（两天内）</div>
+          <div class="ma-small-card">周三桌游夜 · 昨天结束</div>
+          <button class="ma-folder" type="button" aria-expanded="false" data-expired-folder><span>▸ 已过期（结束超过 2 天）</span><span>3 场</span></button>
+          <div class="ma-expired-list" data-expired-list>8/12 · 城市徒步<br>8/08 · 瑜伽体验<br>8/02 · 博物馆夜游</div>
+        </div>
+        <div class="ma-bottom"><span>发现</span><span>消息</span><span class="is-current">我的活动</span><span>我的</span></div>
+      </div>
+    </section>
+
+    <section class="ma-wrap" aria-label="01c 我发起的" id="ma-hosted">
+      <span class="ma-label">01c · 我发起的（整卡进入详情）</span>
+      <div class="ma-phone">
+        <div class="ma-statusbar"><span>9:41</span><span>●●●</span></div>
+        <div class="ma-titlebar"><span class="ma-page-title">我的活动</span><button class="ma-icon" type="button" data-route-target="ma-create">＋<small>创建</small></button></div>
+        <div class="ma-tabs"><button class="ma-tab" type="button">我参与的</button><button class="ma-tab" type="button">我收藏的</button><button class="ma-tab is-current" type="button">我发起的</button></div>
+        <div class="ma-body">
+          <div class="ma-list-head"><span>招募中 1 场</span><span>点击整卡 → 详情</span></div>
+          <button class="ma-card" type="button" data-route-target="ma-detail" aria-label="打开周六午后咖啡与看展活动详情">
+            <div class="ma-card-top"><div class="ma-cover">看展</div><div><div class="ma-card-title">周六午后咖啡与看展</div><div class="ma-card-meta">本周六 14:00 · 798（待定）<br><strong>双人 Dating</strong></div></div></div>
+            <div class="ma-card-foot"><span class="ma-status">招募中 · 4 人申请</span><span>整卡可点</span></div>
+          </button>
+          <div class="ma-section-title">已满</div>
+          <button class="ma-card" type="button" data-route-target="ma-detail"><div class="ma-card-top"><div class="ma-cover">飞盘</div><div><div class="ma-card-title">落日飞盘局</div><div class="ma-card-meta">下周六 17:30 · 朝阳公园<br>多人 · 6 / 6 人</div></div></div></button>
+        </div>
+        <div class="ma-bottom"><span>发现</span><span>消息</span><span class="is-current">我的活动</span><span>我的</span></div>
+      </div>
+    </section>
+
+    <section class="ma-wrap" aria-label="02 活动详情">
+      <span class="ma-label">02 · 活动详情（Dating 强调）</span>
+      <div class="ma-phone is-tall" id="ma-detail">
+        <div class="ma-statusbar"><span>9:41</span><span>●●●</span></div>
+        <div class="ma-titlebar"><span class="ma-back">‹</span><span class="ma-page-title">活动详情</span><span class="ma-iconbar"><button class="ma-icon" type="button" title="分享外链">↗<small>分享</small></button><button class="ma-icon" type="button" title="一键拉群">◎<small>拉群</small></button><button class="ma-icon" type="button" data-menu-toggle title="更多操作">•••</button></span></div>
+        <div class="ma-hero">封面图 / Dating Vibe</div>
+        <div class="ma-tags"><span class="ma-tag">双人 Dating</span><span class="ma-tag">松弛聊天</span><span class="ma-tag">咖啡</span></div>
+        <div class="ma-detail-title">周六午后咖啡与看展</div>
+        <div class="ma-detail-state">招募中 · 1 对 1 约会活动</div>
+        <div class="ma-details">
+          <div class="ma-row"><span class="ma-key">类型 / 人数</span><span>双人 · 固定 2 人（当前 1 / 2）</span></div>
+          <div class="ma-row"><span class="ma-key">Vibe</span><span>轻松 · 有好奇心 · 慢节奏</span></div>
+          <div class="ma-row"><span class="ma-key">做什么</span><span>看展 90 分钟，之后喝咖啡聊天</span></div>
+          <div class="ma-row"><span class="ma-key">时间</span><span>本周六 14:00（可微调）</span></div>
+          <div class="ma-row"><span class="ma-key">地点</span><span>朝阳区 798（待定）</span></div>
+          <div class="ma-row"><span class="ma-key">预算 / 付费</span><span>人均 ¥120 · AA</span></div>
+          <div class="ma-row"><span class="ma-key">押金</span><span>开启 · ¥50</span></div>
+          <div class="ma-row"><span class="ma-key">期待对象</span><span>25–30 岁，愿意交流艺术与旅行</span></div>
+          <div class="ma-row"><span class="ma-key">性别偏好</span><span>女 · 年龄 22–30</span></div>
+          <div class="ma-row"><span class="ma-key">着装 / 截止</span><span>舒适休闲 · 周五 20:00 截止</span></div>
+          <div class="ma-row"><span class="ma-key">发起人 / 可见</span><span>林 · 仅好友可见</span></div>
+          <div class="ma-row"><span class="ma-key">标签 / 描述</span><span>看展、聊天 · AI 生成文案可编辑</span></div>
+        </div>
+        <div class="ma-owner-actions"><button class="ma-action is-solid" type="button" data-route-target="ma-applicants">全部申请人（4）</button><button class="ma-action" type="button" data-route-target="ma-edit">修改活动</button></div>
+        <div class="ma-menu" data-more-menu><button type="button" data-route-target="ma-edit">编辑活动</button><button class="ma-delete" type="button">删除活动</button></div>
+      </div>
+      <div class="ma-arrow-note">顶部：分享外链 / 小拉群图标 / 更多（编辑、删除）</div>
+    </section>
+
+    <section class="ma-wrap" aria-label="03 全部申请人">
+      <span class="ma-label">03 · 全部申请人</span>
+      <div class="ma-phone" id="ma-applicants">
+        <div class="ma-statusbar"><span>9:41</span><span>●●●</span></div>
+        <div class="ma-titlebar"><span class="ma-back">‹</span><span class="ma-page-title">全部申请人</span><span style="width:18px"></span></div>
+        <div class="ma-summary"><span>周六午后咖啡与看展</span><strong>4 人申请</strong></div>
+        <div class="ma-applicant">
+          <div class="ma-applicant-head"><span><i class="ma-avatar">安</i> <strong>安安 · 25</strong></span><span>刚刚申请</span></div>
+          <div class="ma-profile">喜欢摄影和咖啡；期待轻松聊天。时间、预算、年龄偏好均匹配。</div>
+          <div class="ma-app-actions"><button class="ma-mini" type="button" data-route-target="ma-im">回复</button><button class="ma-mini is-ok" type="button" data-route-target="ma-payment">同意</button><button class="ma-mini is-reject" type="button" data-route-target="ma-reject">拒绝</button></div>
+        </div>
+        <div class="ma-applicant">
+          <div class="ma-applicant-head"><span><i class="ma-avatar">凯</i> <strong>凯 · 27</strong></span><span>12 分钟前</span></div>
+          <div class="ma-profile">常去 798 看展，申请理由：想认识也喜欢当代艺术的人。</div>
+          <div class="ma-app-actions"><button class="ma-mini" type="button" data-route-target="ma-im">回复</button><button class="ma-mini is-ok" type="button" data-route-target="ma-payment">同意</button><button class="ma-mini is-reject" type="button" data-route-target="ma-reject">拒绝</button></div>
+        </div>
+        <div class="ma-caption"><strong>回复</strong>：进入带该 Date 上下文的 IM。<br><strong>同意</strong>：Guest 进入待支付 Lock fee；支付成功后才加入已同意名单。<br><strong>拒绝</strong>：必须填写原因，写入匹配算法反馈。</div>
+      </div>
+    </section>
+
+    <section class="ma-wrap" aria-label="03b 拒绝理由">
+      <span class="ma-label">03b · 拒绝理由（算法反馈）</span>
+      <div class="ma-phone is-modal" id="ma-reject">
+        <div class="ma-statusbar"><span>9:41</span><span>●●●</span></div>
+        <div class="ma-modal-sheet">
+          <div class="ma-modal-title">拒绝 安安 的申请</div>
+          <div class="ma-modal-copy">选择至少一项理由；理由会作为后续匹配排序的反馈，并向申请者展示礼貌说明。</div>
+          <div class="ma-reasons"><span class="ma-reason">期待不匹配</span><span class="ma-reason">时间不匹配</span><span class="ma-reason">年龄 / 性别偏好</span><span class="ma-reason">名额已满</span><span class="ma-reason">其他</span></div>
+          <div class="ma-input">补充给对方的说明（可选）</div>
+          <div class="ma-check"><span class="ma-checkmark">✓</span><span>将选中的拒绝原因写入匹配算法反馈</span></div>
+          <button class="ma-action is-solid" type="button" style="margin-top:8px">确认拒绝</button>
+        </div>
+      </div>
+      <div class="ma-arrow-note">03 点击「拒绝」→ 此确认页</div>
+    </section>
+
+    <section class="ma-wrap" aria-label="04 修改活动">
+      <span class="ma-label">04 · 修改活动（提交前硬规则）</span>
+      <div class="ma-phone" id="ma-edit">
+        <div class="ma-statusbar"><span>9:41</span><span>●●●</span></div>
+        <div class="ma-titlebar"><span class="ma-back">‹</span><span class="ma-page-title">修改活动</span><span></span></div>
+        <div class="ma-form">
+          <label class="ma-field-label">活动描述 <span class="ma-tag">仅此字段可简单修改</span></label>
+          <div class="ma-field is-text">周六下午一起看展，结束后找一家安静的咖啡馆聊聊。</div>
+          <div class="ma-group"><strong>重要字段组</strong>标题、类型、vibe、活动内容、时间、地点、预算、付费、押金、期待、人数、性别、年龄、着装、截止时间、封面、标签、发起人介绍、可见性</div>
+          <label class="ma-field-label" style="margin-top:8px">时间 / 地点</label><div class="ma-field">周日 15:00 · 三里屯（待定）</div>
+          <label class="ma-field-label">预算 / 付费 / 押金</label><div class="ma-field">¥160 · AA · 押金 ¥50</div>
+        </div>
+        <div class="ma-rule"><b>提交时硬判定：</b>dirty_fields 仅为 <b>description</b> → 简单修改；任何其他字段有变化 → 重要修改。</div>
+        <button class="ma-publish" type="button" data-route-target="ma-important">提交修改 → 判定并通知</button>
+      </div>
+    </section>
+
+    <section class="ma-wrap" aria-label="简单与重要修改通知">
+      <span class="ma-label">04b · 判定结果与发布通知</span>
+      <div class="ma-phone">
+        <div class="ma-statusbar"><span>9:41</span><span>●●●</span></div>
+        <div class="ma-titlebar"><span class="ma-back">‹</span><span class="ma-page-title">发布修改</span><span></span></div>
+        <div class="ma-notice">
+          <div class="ma-notice-title"><span>简单修改</span><span>仅活动描述</span></div>
+          <div class="ma-notice-copy">将记录在活动详情的修改历史，并提示相关用户「活动描述已更新」。不改变报名状态，也不要求重新确认。</div>
+          <div class="ma-check"><span class="ma-checkmark">✓</span><span>通知待处理申请人与已同意参与者</span></div>
+          <div class="ma-check"><span class="ma-checkmark is-empty">✓</span><span>同步活动群消息（默认关闭）</span></div>
+          <button class="ma-action is-solid" type="button" style="margin-top:8px">发布简单修改</button>
+        </div>
+        <div class="ma-notice" id="ma-important" style="margin-top:9px">
+          <div class="ma-notice-title"><span>重要修改</span><span>时间、地点、费用等</span></div>
+          <div class="ma-notice-copy">示例：周六 14:00 → 周日 15:00；798 → 三里屯；¥120 → ¥160。</div>
+          <div class="ma-check"><span class="ma-checkmark">✓</span><span>通知待处理申请人与已同意参与者</span></div>
+          <div class="ma-check"><span class="ma-checkmark">✓</span><span>已同意者需重新确认；未确认名额暂不释放</span></div>
+          <div class="ma-check"><span class="ma-checkmark">✓</span><span>同步活动群消息，并展示变更历史</span></div>
+          <div class="ma-check"><span class="ma-checkmark">✓</span><span>变更后重新参与活动池匹配</span></div>
+          <div class="ma-notice-copy" style="margin:6px 0 0"><strong>阻断：</strong>人数上限不得低于已同意人数；截止时间、时间与押金配置必须合法。</div>
+          <button class="ma-action is-solid" type="button" style="margin-top:8px">发布重要修改</button>
+        </div>
+      </div>
+      <div class="ma-arrow-note">两种路径均先展示通知提示，最后「发布」</div>
+    </section>
+
+    <section class="ma-wrap" aria-label="05a P0 活动结束评价">
+      <span class="ma-label">05a · 活动结束评价（P0，3 问可跳过）</span>
+      <div class="ma-phone" id="ma-quick-eval">
+        <div class="ma-statusbar"><span>9:41</span><span>●●●</span></div>
+        <div class="ma-titlebar"><span class="ma-back">‹</span><span class="ma-page-title">这次 Date 怎么样？</span><button class="ma-icon" type="button" data-route-target="ma-feedback">跳过</button></div>
+        <div class="ma-feedback-event"><strong>周三桌游夜</strong><span>已结束 · 仅需 3 问，也可跳过</span></div>
+        <div class="ma-option-stack"><button class="ma-option" type="button"><span><strong>1. 活动体验如何？</strong><span>很好 / 还不错 / 一般</span></span><b>›</b></button><button class="ma-option" type="button"><span><strong>2. 还愿意参加类似 Date 吗？</strong><span>愿意 / 看情况 / 暂不</span></span><b>›</b></button><button class="ma-option" type="button" data-route-target="ma-group-continue"><span><strong>3. 想继续认识活动中的人吗？</strong><span>愿意 / 暂不；选择愿意才进入私密续联</span></span><b>›</b></button></div>
+        <button class="ma-publish" type="button" data-route-target="ma-feedback">提交评价</button>
+      </div>
+      <div class="ma-arrow-note">P0 到此闭环；后续 Host 服务反馈与 Dating 双向续联是独立、可选路径。</div>
+    </section>
+
+    <section class="ma-wrap" aria-label="05 活动后反馈总览">
+      <span class="ma-label">05 · 活动后：Host 反馈与续联</span>
+      <div class="ma-phone is-tall" id="ma-feedback">
+        <div class="ma-statusbar"><span>9:41</span><span>●●●</span></div>
+        <div class="ma-titlebar"><span class="ma-back">‹</span><span class="ma-page-title">活动后</span><span></span></div>
+        <div class="ma-feedback-event"><strong>周三桌游夜</strong><span>已结束 · Host：林</span></div>
+        <div class="ma-rating-card">
+          <div class="ma-rating-title"><span>给 Host 的活动反馈</span><span>私密 IM</span></div>
+          <div class="ma-score-row"><span>活动安排</span><button class="ma-stars" type="button" aria-label="活动安排 5 分" data-rating><span class="ma-score-on">★</span><span class="ma-score-on">★</span><span class="ma-score-on">★</span><span class="ma-score-on">★</span><span class="ma-score-on">★</span></button></div>
+          <div class="ma-score-row"><span>与描述相符</span><button class="ma-stars" type="button" aria-label="与描述相符 4 分" data-rating><span class="ma-score-on">★</span><span class="ma-score-on">★</span><span class="ma-score-on">★</span><span class="ma-score-on">★</span><span class="ma-score-off">★</span></button></div>
+          <div class="ma-score-row"><span>整体体验</span><button class="ma-stars" type="button" aria-label="整体体验 4 分" data-rating><span class="ma-score-on">★</span><span class="ma-score-on">★</span><span class="ma-score-on">★</span><span class="ma-score-on">★</span><span class="ma-score-off">★</span></button></div>
+          <div class="ma-private-note">🔒 仅作为一条私密消息发送到你和 Host 的 IM；这不是对某位参与者的 Dating 评价。</div>
+          <button class="ma-action is-solid" type="button" style="width:100%; margin-top:7px">发送活动反馈</button>
+        </div>
+        <div class="ma-option-stack">
+          <button class="ma-option" type="button" data-route-target="ma-dating-continue"><span><strong>双人 Dating：继续认识 Host</strong><span>相处感受与续联意愿仅双方互选后揭晓</span></span><b>›</b></button>
+          <button class="ma-option" type="button" data-route-target="ma-group-continue"><span><strong>多人活动：选择继续认识的人</strong><span>逐人留下私密续联信号</span></span><b>›</b></button>
+          <button class="ma-option" type="button" data-route-target="ma-memory"><span><strong>上传活动记忆</strong><span>公开照片将显示在个人主页照片专区</span></span><b>›</b></button>
+        </div>
+      </div>
+      <div class="ma-arrow-note">Host 活动反馈与 Dating 续联是两条独立的数据与通知路径</div>
+    </section>
+
+    <section class="ma-wrap" aria-label="05b 双人 Dating 续联">
+      <span class="ma-label">05b · 双人 Dating：互选续联</span>
+      <div class="ma-phone is-tall" id="ma-dating-continue">
+        <div class="ma-statusbar"><span>9:41</span><span>●●●</span></div>
+        <div class="ma-titlebar"><span class="ma-back">‹</span><span class="ma-page-title">继续认识林</span><span class="ma-private-pill">仅系统可见</span></div>
+        <div class="ma-feedback-event"><strong><i class="ma-avatar">林</i> 林 · 本次双人 Dating 对象</strong><span>下面选择不会显示给对方，直到产生互选。</span></div>
+        <div class="ma-rating-card">
+          <div class="ma-rating-title"><span>相处舒适度</span><span>用于匹配优化</span></div>
+          <div class="ma-score-row"><span>舒适感受</span><button class="ma-stars" type="button" aria-label="舒适感受 4 分" data-rating><span class="ma-score-on">★</span><span class="ma-score-on">★</span><span class="ma-score-on">★</span><span class="ma-score-on">★</span><span class="ma-score-off">★</span></button></div>
+          <div class="ma-private-note">此评分不会发送给林，也不会在 IM 或主页展示。</div>
+        </div>
+        <div class="ma-form">
+          <label class="ma-field-label">是否愿意再见？</label><div class="ma-reasons"><span class="ma-reason">愿意</span><span class="ma-reason">可以再聊聊</span><span class="ma-reason">不继续</span></div>
+          <label class="ma-field-label">是否愿意继续私聊？</label><div class="ma-reasons"><span class="ma-reason">愿意</span><span class="ma-reason">暂不</span></div>
+          <label class="ma-field-label">是否愿意互相公开联系方式？</label><div class="ma-reasons"><span class="ma-reason">双方同意后生效</span><span class="ma-reason">暂不</span></div>
+        </div>
+        <div class="ma-caption">只有双方选择愿意再见或愿意继续聊天，才解锁「再次约」或持续私聊；单方选择永不对外暴露。</div>
+        <button class="ma-publish" type="button">提交私密续联意愿</button>
+      </div>
+      <div class="ma-arrow-note">双人模式：Host 即 Dating 对象；活动反馈不等同于续联选择</div>
+    </section>
+
+    <section class="ma-wrap" aria-label="05c 多人活动选择续联对象">
+      <span class="ma-label">05c · 多人活动：选择对象</span>
+      <div class="ma-phone" id="ma-group-continue">
+        <div class="ma-statusbar"><span>9:41</span><span>●●●</span></div>
+        <div class="ma-titlebar"><span class="ma-back">‹</span><span class="ma-page-title">继续认识谁？</span><span class="ma-private-pill">私密</span></div>
+        <div class="ma-feedback-event"><strong>周三桌游夜 · 其他参与者</strong><span>可选 0–4 人；每一对独立匹配。</span></div>
+        <div class="ma-person-grid" aria-label="选择想继续认识的参与者">
+          <button class="ma-person is-selected" type="button" data-person><i class="ma-avatar">安</i><span>安安</span></button>
+          <button class="ma-person" type="button" data-person><i class="ma-avatar">凯</i><span>凯</span></button>
+          <button class="ma-person" type="button" data-person><i class="ma-avatar">木</i><span>木木</span></button>
+          <button class="ma-person" type="button" data-person><i class="ma-avatar">南</i><span>南南</span></button>
+        </div>
+        <div class="ma-caption" style="margin-top:10px">已选择 <strong data-selected-count>1</strong> 人。对方不会收到选择结果；只有双方互选后才会收到续联提醒。</div>
+        <div class="ma-option-stack">
+          <button class="ma-option" type="button" data-route-target="ma-person-feedback"><span><strong>填写对 安安 的私密续联意愿</strong><span>评分仅系统可见；续联需要互选</span></span><b>›</b></button>
+          <button class="ma-option" type="button" data-route-target="ma-memory"><span><strong>上传本次活动记忆</strong><span>与续联结果互不关联</span></span><b>›</b></button>
+        </div>
+      </div>
+      <div class="ma-arrow-note">多人模式：选择其他参与者，再逐人填写续联反馈</div>
+    </section>
+
+    <section class="ma-wrap" aria-label="05d 多人活动逐人反馈">
+      <span class="ma-label">05d · 多人活动：逐人私密反馈</span>
+      <div class="ma-phone is-tall" id="ma-person-feedback">
+        <div class="ma-statusbar"><span>9:41</span><span>●●●</span></div>
+        <div class="ma-titlebar"><span class="ma-back">‹</span><span class="ma-page-title">对安安的续联反馈</span><span class="ma-private-pill">仅系统可见</span></div>
+        <div class="ma-feedback-event"><strong><i class="ma-avatar">安</i> 安安 · 周三桌游夜参与者</strong><span>对方不会看到分数或单方选择。</span></div>
+        <div class="ma-rating-card">
+          <div class="ma-rating-title"><span>相处舒适度</span><span>用于匹配优化</span></div>
+          <div class="ma-score-row"><span>舒适感受</span><button class="ma-stars" type="button" aria-label="舒适感受 4 分" data-rating><span class="ma-score-on">★</span><span class="ma-score-on">★</span><span class="ma-score-on">★</span><span class="ma-score-on">★</span><span class="ma-score-off">★</span></button></div>
+          <div class="ma-private-note">与 Host 的活动评分分开保存，不会形成可见的参与者排行榜。</div>
+        </div>
+        <div class="ma-form">
+          <label class="ma-field-label">愿意继续认识安安吗？</label><div class="ma-reasons"><span class="ma-reason">愿意再约</span><span class="ma-reason">可以再聊聊</span><span class="ma-reason">不继续</span></div>
+          <label class="ma-field-label">愿意继续私聊？</label><div class="ma-reasons"><span class="ma-reason">愿意</span><span class="ma-reason">暂不</span></div>
+          <label class="ma-field-label">愿意互相公开联系方式？</label><div class="ma-reasons"><span class="ma-reason">双方同意后生效</span><span class="ma-reason">暂不</span></div>
+        </div>
+        <div class="ma-caption">每位参与者均独立处理；只有该配对双方均愿意，才生成「继续聊天」或「再次约」入口。</div>
+        <button class="ma-publish" type="button">保存对安安的私密意愿</button>
+      </div>
+    </section>
+
+    <section class="ma-wrap" aria-label="06 上传活动记忆">
+      <span class="ma-label">06 · 上传活动记忆</span>
+      <div class="ma-phone" id="ma-memory">
+        <div class="ma-statusbar"><span>9:41</span><span>●●●</span></div>
+        <div class="ma-titlebar"><span class="ma-back">‹</span><span class="ma-page-title">活动记忆</span><span></span></div>
+        <div class="ma-feedback-event"><strong>周三桌游夜</strong><span>最多上传 9 张照片</span></div>
+        <div class="ma-memory-card">
+          <div class="ma-photo-grid"><div class="ma-photo is-filled">记忆照片</div><div class="ma-photo">＋ 上传</div><div class="ma-photo">＋ 上传</div></div>
+          <div class="ma-field" style="margin-bottom:0">照片描述：第一次玩这个桌游，大家很有耐心。</div>
+          <div class="ma-privacy"><span>公开后标注为「活动照片」<br>展示在我的主页照片专区</span><button class="ma-privacy-toggle" type="button" aria-pressed="true" data-privacy-toggle>公开</button></div>
+          <button class="ma-action" type="button" style="width:100%; margin-top:8px" data-route-target="ma-profile-photos">保存活动记忆</button>
+        </div>
+        <div class="ma-caption">活动记忆与活动反馈、续联选择互相独立。公开仅影响照片专区，不公开评分与续联结果。</div>
+      </div>
+    </section>
+
+    <section class="ma-wrap" aria-label="个人主页活动照片">
+      <span class="ma-label">07 · 个人主页 · 照片专区</span>
+      <div class="ma-phone" id="ma-profile-photos">
+        <div class="ma-statusbar"><span>9:41</span><span>●●●</span></div>
+        <div class="ma-profile-head"><div class="ma-profile-name">我的主页</div><div class="ma-profile-copy">照片专区 · 公开活动记忆会显示为活动照片</div></div>
+        <div class="ma-profile-section">照片专区</div>
+        <button class="ma-profile-photo" type="button" data-route-target="ma-detail" aria-label="打开周三桌游夜活动详情">
+          <div class="ma-profile-photo-main">活动记忆照片</div>
+          <div class="ma-photo-caption"><strong>第一次玩这个桌游，大家很有耐心。</strong><span>活动照片 · 周三桌游夜　→ 点击进入活动详情</span></div>
+        </button>
+        <div class="ma-caption">仅选择「公开」的活动记忆进入照片专区。照片始终携带「活动照片」来源标识；点击描述或照片跳回对应活动详情。</div>
+      </div>
+      <div class="ma-arrow-note">06 选择公开并保存 → 主页照片专区；点击照片/描述 → 02</div>
+    </section>
+  </div>
+
+  <script>
+    (function () {
+      const root = document.getElementById('my-activities-v2');
+      const folder = root.querySelector('[data-expired-folder]');
+      const expired = root.querySelector('[data-expired-list]');
+      folder.addEventListener('click', function () {
+        const isOpen = expired.classList.toggle('is-open');
+        folder.setAttribute('aria-expanded', String(isOpen));
+        folder.firstElementChild.textContent = (isOpen ? '▾' : '▸') + ' 已过期（结束超过 2 天）';
+      });
+      root.querySelectorAll('[data-route-target]').forEach(function (trigger) {
+        trigger.addEventListener('click', function () {
+          const target = root.querySelector('#' + trigger.dataset.routeTarget);
+          if (!target) return;
+          root.querySelectorAll('.ma-highlight').forEach(function (node) { node.classList.remove('ma-highlight'); });
+          target.classList.add('ma-highlight');
+          target.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+        });
+      });
+      const moreMenu = root.querySelector('[data-more-menu]');
+      const menuToggle = root.querySelector('[data-menu-toggle]');
+      menuToggle.addEventListener('click', function () { moreMenu.hidden = !moreMenu.hidden; });
+      root.querySelectorAll('[data-privacy-toggle]').forEach(function (toggle) {
+        toggle.addEventListener('click', function () {
+          const isPublic = toggle.getAttribute('aria-pressed') !== 'true';
+          toggle.setAttribute('aria-pressed', String(isPublic));
+          toggle.textContent = isPublic ? '公开' : '仅自己可见';
+        });
+      });
+      root.querySelectorAll('[data-rating]').forEach(function (rating) {
+        rating.addEventListener('click', function () {
+          const activeStars = rating.querySelectorAll('.ma-score-on');
+          const nextCount = activeStars.length === 5 ? 1 : activeStars.length + 1;
+          rating.querySelectorAll('span').forEach(function (star, index) {
+            star.className = index < nextCount ? 'ma-score-on' : 'ma-score-off';
+          });
+          rating.setAttribute('aria-label', '评分 ' + nextCount + ' 分');
+        });
+      });
+      const selectedCount = root.querySelector('[data-selected-count]');
+      root.querySelectorAll('[data-person]').forEach(function (person) {
+        person.setAttribute('aria-pressed', String(person.classList.contains('is-selected')));
+        person.addEventListener('click', function () {
+          person.classList.toggle('is-selected');
+          person.setAttribute('aria-pressed', String(person.classList.contains('is-selected')));
+          selectedCount.textContent = String(root.querySelectorAll('[data-person].is-selected').length);
+        });
+      });
+    }());
+  </script>
+</div>
