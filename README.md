@@ -27,7 +27,8 @@ npm run dev
 格式。
 
 当前仓库仍是前端原型：语音识别、字段状态计算与模型调用需要由后端实现。Host
-资料需以 `host_id` 建立明确映射后再接入活动库，不能根据活动序号猜测关联。
+资料已整理为 [`src/data/host-profiles.json`](src/data/host-profiles.json)。它需以
+`host_id` 建立明确映射后再接入活动库，不能根据活动序号猜测关联。
 
 ## 构建
 
