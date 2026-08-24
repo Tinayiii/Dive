@@ -299,6 +299,7 @@ function App() {
   const [profileDraft, setProfileDraft] = useState(null);
   const [discardProfileEdit, setDiscardProfileEdit] = useState(false);
   const [roleHint, setRoleHint] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
   const [swipeMotion, setSwipeMotion] = useState({ x:0, dragging:false, exiting:false });
   const [failedCoverIds, setFailedCoverIds] = useState([]);
   const [failedActivityImageIds, setFailedActivityImageIds] = useState([]);
@@ -546,7 +547,26 @@ function App() {
       {links.slice(2).map(([name, symbol, label]) => <button key={name} className={screen.name === name ? 'active' : ''} onClick={() => go(name, {}, { resetHistory:true })}><b>{symbol}</b><span>{label}</span></button>)}
     </nav>;
   }
-  function Layout({ title, back, children, bare = false, noHeader = false, onBack }) { return <><aside className="desktop-note"><img src="/dive-plan-icon.png" alt="Dive"/><h2>移动端流程模拟器</h2><p>用浏览器验证逻辑与跳转。顶部「Vivi / 林」是原型测试角色切换，正式产品不会出现。</p><button onClick={() => setRoleHint(!roleHint)}>{roleHint ? '收起测试提示' : '显示测试提示'}</button></aside><main className={`phone ${bare ? 'phone-no-nav' : 'phone-has-nav'}`}>{roleHint && <div className="prototype-ribbon">原型测试：切换「Vivi / 林」可完整走 Guest → Host 审批 → Lock 流程。</div>}{!noHeader && <Header title={title} back={back} onBack={onBack}/>}<section className={`screen ${noHeader ? 'screen-no-header' : ''}`} style={noHeader ? { padding:0 } : undefined}>{children}</section>{!bare && <Nav/>}</main>{toast && <div className="toast">{toast}</div>}{notificationOpen && <NotificationSheet/>}{rejectTarget && <RejectSheet/>}{discardProfileEdit && <DiscardProfileSheet/>}{chatActionId && <ChatActionSheet chat={chats.find((chat) => chat.id === chatActionId)}/>} {contextPickerId && <ContextPickerSheet chat={chats.find((chat) => chat.id === contextPickerId)}/>} {chatPlusId && <ChatPlusSheet chatId={chatPlusId}/>} {imagePreview && <ImagePreviewSheet/>}</> }
+  function Layout({ title, back, children, bare = false, noHeader = false, onBack }) { return <><aside className="desktop-note"><img src="/dive-plan-icon.png" alt="Dive"/><h2>移动端流程模拟器</h2><p>用浏览器验证逻辑与跳转。当前版本可完全离线体验，不需要连接后端。</p><button onClick={() => setPreviewOpen(true)}>打开 Preview 导览</button><button onClick={() => setRoleHint(!roleHint)}>{roleHint ? '收起测试提示' : '显示测试提示'}</button></aside><main className={`phone ${bare ? 'phone-no-nav' : 'phone-has-nav'}`}>{roleHint && <div className="prototype-ribbon">原型测试：切换「Vivi / 林」可完整走 Guest → Host 审批 → Lock 流程。</div>}{!noHeader && <Header title={title} back={back} onBack={onBack}/>}<section className={`screen ${noHeader ? 'screen-no-header' : ''}`} style={noHeader ? { padding:0 } : undefined}>{children}</section><button className="preview-fab" onClick={() => setPreviewOpen(true)} aria-label="打开 Preview 导览">Preview</button>{!bare && <Nav/>}</main>{toast && <div className="toast">{toast}</div>}{previewOpen && <PreviewGuide/>}{notificationOpen && <NotificationSheet/>}{rejectTarget && <RejectSheet/>}{discardProfileEdit && <DiscardProfileSheet/>}{chatActionId && <ChatActionSheet chat={chats.find((chat) => chat.id === chatActionId)}/>} {contextPickerId && <ContextPickerSheet chat={chats.find((chat) => chat.id === contextPickerId)}/>} {chatPlusId && <ChatPlusSheet chatId={chatPlusId}/>} {imagePreview && <ImagePreviewSheet/>}</> }
+
+  function PreviewGuide() {
+    const jump = (action) => {
+      setPreviewOpen(false);
+      action();
+    };
+    const useGuest = () => setActor('vivi');
+    const useHost = () => setActor('lin');
+    const shortcuts = [
+      ['逛活动广场', '滑卡、收藏、查看活动详情', () => { useGuest(); setDiscoverView('cards'); go('discover', {}, { resetHistory:true }); }],
+      ['列表检索活动', '搜索、筛状态、筛活动类型', () => { useGuest(); setDiscoverView('list'); go('discover', {}, { resetHistory:true }); }],
+      ['Guest 申请进度', 'Apply 后的待审核与 Lock fee 状态', () => { useGuest(); setMyTab('joined'); go('my', {}, { resetHistory:true }); }],
+      ['Host 审批台', '同意、拒绝、修改活动与管理席位', () => { useHost(); setMyTab('hosted'); go('my', {}, { resetHistory:true }); }],
+      ['创建一场 Date', '七步发布流程，本地 AI 建议可用', () => { useHost(); setCreateStep(1); go('create'); }],
+      ['活动 IM', '带活动上下文的私聊、转发和图片发送', () => { useGuest(); go('im', {}, { resetHistory:true }); }],
+      ['公开 Profile', '照片、偏好、隐私与历史记录', () => { useGuest(); go('profile', {}, { resetHistory:true }); }],
+    ];
+    return <Sheet close={() => setPreviewOpen(false)}><section className="preview-guide"><p className="eyebrow">INTERACTIVE PREVIEW</p><h2>Dive 前端预览版</h2><p className="muted">不接后端也能完整跑通核心体验。数据会保存在当前浏览器内存里，刷新后回到初始状态。</p><div className="preview-shortcuts">{shortcuts.map(([title, copy, action]) => <button key={title} onClick={() => jump(action)}><span>✦</span><div><b>{title}</b><small>{copy}</small></div><i>›</i></button>)}</div><section className="preview-flow-note"><b>推荐演示路径</b><p>Vivi 在广场 Apply → 切到林进入 Host 审批 → 同意申请 → 切回 Vivi 支付 Lock fee → 查看 Invite 和 IM。</p></section></section></Sheet>;
+  }
 
   function Hero({ date, compact = false, onClick, onImageClick, disabled = false }) { const host = people[date.host]; const cardImage = date.hostImage || date.coverImage; const showCoverImage = cardImage && !failedCoverIds.includes(date.id); const openCard = (event) => { if (!onClick || disabled) return; event.stopPropagation(); const imageArea = event.target === event.currentTarget || event.target.classList.contains('hero-shine'); (imageArea && onImageClick ? onImageClick : onClick)(); }; const openHostArea = (event) => { event.stopPropagation(); go('profile', { userId:date.host }); }; return <article className={`hero cover-${date.cover} ${compact ? 'compact' : ''} ${disabled ? 'is-disabled' : ''}`} onClick={openCard} aria-disabled={disabled || undefined}>{showCoverImage && <img className="hero-cover-image" src={cardImage} alt="" onError={() => setFailedCoverIds((ids) => ids.includes(date.id) ? ids : [...ids, date.id])}/>}<div className="hero-shine"/><div className="pills"><Pill>{modeName[date.mode]}</Pill><Pill>{date.status}</Pill><Pill>¥{date.budget}</Pill></div><div className="hero-body"><p className="hero-kicker">{date.mode === 'one' ? '为两个人留出一点真实时间' : '在具体场景里自然认识一群人'}</p><h2>{date.title}</h2><p>{date.content}</p><div className="date-grid frosted"><div><small>时间</small><b>{date.time}</b></div><div><small>区域</small><b>{date.location}</b></div></div><button className="host-card frosted" onClick={openHostArea} aria-label={`查看 ${host.name} 的 Profile`}><Avatar id={date.host}/><span><b>{host.name} · {host.age}</b><small>{host.intro}</small></span>{date.mode === 'small' && <AvatarStack ids={date.attendees}/>}</button></div></article>; }
   function AvatarStack({ ids = [] }) { return <div className="avatar-stack">{ids.slice(0,3).map((id) => <Avatar id={id} small key={id}/>)}{ids.length > 3 && <i>+{ids.length - 3}</i>}</div> }
