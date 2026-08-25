@@ -5,10 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
-    "build": "vite build",
+    "build": "vite build && node scripts/create-sites-worker.mjs",
     "preview": "vite preview --host 127.0.0.1"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.112.3",
     "@tailwindcss/typography": "^0.5.20",
     "@vitejs/plugin-react": "latest",
     "react": "latest",
